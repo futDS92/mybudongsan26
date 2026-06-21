@@ -1553,15 +1553,9 @@ async function runMonitor() {
   render();
   const lawdCodes = getMonitorLawdCodes();
   const dealMonth = state.settings.dealMonth || new Date().toISOString().slice(0, 7).replace("-", "");
-  const dealMonths = getRecentDealMonths(dealMonth, 48);
-  const tradeGroups = await Promise.all(lawdCodes.flatMap((lawdCode) => (
-    dealMonths.map((month) => fetchMolitRecords("trade", lawdCode, month))
-  )));
-  const rentGroups = await Promise.all(lawdCodes.flatMap((lawdCode) => (
-    dealMonths.map((month) => fetchMolitRecords("rent", lawdCode, month))
-  )));
-  const trades = tradeGroups.flat();
-  const rents = rentGroups.flat();
+  const dealMonths = getRecentDealMonths(dealMonth, 12);
+  const trades = await fetchMolitSeries("trade", lawdCodes, dealMonths);
+  const rents = await fetchMolitSeries("rent", lawdCodes, dealMonths);
   const derivedChanged = await enrichLocationSignals();
   applyMolitRecords(trades, rents);
   updatePropertyHistories(trades, rents);
@@ -1586,6 +1580,17 @@ async function runMonitor() {
   saveState();
   render();
   if (derivedChanged) render({ skipMap: true });
+}
+
+async function fetchMolitSeries(type, lawdCodes, dealMonths) {
+  const collected = [];
+  for (const lawdCode of lawdCodes) {
+    for (const month of dealMonths) {
+      const records = await fetchMolitRecords(type, lawdCode, month);
+      if (records.length) collected.push(...records);
+    }
+  }
+  return collected;
 }
 
 function getRecentDealMonths(baseMonth, count) {
