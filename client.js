@@ -200,7 +200,7 @@ const defaultState = {
       subwayDistance: 0,
       tags: ["성남", "관심단지"],
       aliases: ["코오롱하늘채", "코오롱하늘채아파트 성남", "성남 코오롱하늘채"],
-      expectedDistricts: ["성남", "단대동", "수정구"],
+      expectedDistricts: ["성남", "중원구", "은행동"],
       risk: "실거래와 임장 정보 입력 필요.",
       x: 56,
       y: 52,
@@ -281,6 +281,13 @@ const defaultState = {
       read: true,
     },
   ],
+  monitorSummary: {
+    tradeCount: 0,
+    rentCount: 0,
+    matchedCount: 0,
+    backfillCount: 0,
+    lastRunAt: "",
+  },
   propertyTradeHistory: {},
   propertyRentHistory: {},
   news: [
@@ -451,6 +458,10 @@ function loadState() {
       propertyTradeHistory: parsed.propertyTradeHistory || {},
       propertyRentHistory: parsed.propertyRentHistory || {},
       news: parsed.news || structuredClone(defaultState.news),
+      monitorSummary: {
+        ...structuredClone(defaultState.monitorSummary),
+        ...parsed.monitorSummary,
+      },
       sourceDatasets: mergeById(defaultState.sourceDatasets, parsed.sourceDatasets || []),
     });
   } catch {
@@ -717,6 +728,15 @@ function renderSecurity() {
 function renderSettings() {
   const effectiveMolitKey = state.settings.molitKey || privateConfig.molitKey || "";
   document.querySelector("#molitStatus").textContent = effectiveMolitKey ? "설정됨" : "키 미설정";
+  const monitorSummary = state.monitorSummary || defaultState.monitorSummary;
+  const monitorText = [
+    `${monitorSummary.tradeCount || 0}건 매매`,
+    `${monitorSummary.rentCount || 0}건 전월세`,
+    `${monitorSummary.matchedCount || 0}개 반영`,
+    monitorSummary.backfillCount ? `보강 ${monitorSummary.backfillCount}개` : "보강 0개",
+  ].join(" · ");
+  const monitorNode = document.querySelector("#monitorStatus");
+  if (monitorNode) monitorNode.textContent = monitorText;
   document.querySelector("#molitEndpoint").value = state.settings.molitEndpoint || defaultState.settings.molitEndpoint;
   document.querySelector("#rentEndpoint").value = state.settings.rentEndpoint || defaultState.settings.rentEndpoint;
   document.querySelector("#vworldEndpoint").value = buildVworldBoundaryUrl({ includeKey: false });
@@ -1556,9 +1576,24 @@ async function runMonitor() {
   const dealMonths = getRecentDealMonths(dealMonth, 12);
   const trades = await fetchMolitSeries("trade", lawdCodes, dealMonths);
   const rents = await fetchMolitSeries("rent", lawdCodes, dealMonths);
-  const derivedChanged = await enrichLocationSignals();
+  const baseChanged = await enrichLocationSignals();
   applyMolitRecords(trades, rents);
   updatePropertyHistories(trades, rents);
+
+  const missingProperties = state.properties.filter((property) => property.tags?.includes("관심단지") && needsMarketBackfill(property));
+  let allTrades = trades;
+  let allRents = rents;
+  let deepChanged = false;
+  if (missingProperties.length) {
+    const extraMonths = getRecentDealMonths(dealMonth, 84).slice(12);
+    const extraTrades = await fetchMolitSeries("trade", lawdCodes, extraMonths);
+    const extraRents = await fetchMolitSeries("rent", lawdCodes, extraMonths);
+    allTrades = [...trades, ...extraTrades];
+    allRents = [...rents, ...extraRents];
+    applyMolitRecords(allTrades, allRents);
+    updatePropertyHistories(allTrades, allRents);
+    deepChanged = true;
+  }
   const first = state.properties[0];
   const fetchedNews = await collectNewsItems();
   if (requestId !== newsRequestSeq) return;
@@ -1576,10 +1611,27 @@ async function runMonitor() {
     addTimeline(first.id, "VWorld", `${state.settings.lawdCode || "시군구"} 시군구 경계 레이어 기준으로 지도 영역을 갱신했습니다.`);
     addTimeline(first.id, "뉴스", `${latest.keyword} 키워드 뉴스가 수집되었습니다.`);
   }
+  state.monitorSummary = {
+    tradeCount: allTrades.length,
+    rentCount: allRents.length,
+    matchedCount: state.properties.filter((property) => property.price || property.lastTradeDate || property.rentDeposit || property.monthlyRent).length,
+    backfillCount: missingProperties.length,
+    lastRunAt: new Date().toLocaleString("ko-KR", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+  };
   state.newsLoading = false;
   saveState();
   render();
-  if (derivedChanged) render({ skipMap: true });
+  if (baseChanged || deepChanged) render({ skipMap: true });
+}
+
+function needsMarketBackfill(property) {
+  return !property.price || !property.lastTradeDate || !property.rentDeposit || !property.monthlyRent;
 }
 
 async function fetchMolitSeries(type, lawdCodes, dealMonths) {
@@ -1709,13 +1761,13 @@ function parseMolitXml(xmlText, type) {
 function normalizeTradeRecord(record) {
   const [year, month, day] = extractMolitDate(record);
   return {
-    aptName: record.aptNm || record.아파트 || record.아파트명 || record.단지명 || record.aptName || "",
-    umdName: record.umdNm || record.법정동 || record.법정동읍면동 || "",
+    aptName: record.aptNm || record.아파트 || record.아파트명 || record.단지명 || record.aptName || record.단지 || "",
+    umdName: record.umdNm || record.법정동 || record.법정동읍면동 || record.읍면동 || "",
     sggCode: record.sggCd || record.roadNmSggCd || "",
-    amount: parseAmount(record.dealAmount || record.거래금액 || record.dealAmt),
-    area: Number(record.excluUseAr || record.전용면적 || 0),
-    floor: Number(record.floor || record.층 || 0),
-    buildYear: Number(record.buildYear || record.건축년도 || 0),
+    amount: parseAmount(record.dealAmount || record.거래금액 || record.dealAmt || record.매매금액),
+    area: Number(record.excluUseAr || record.전용면적 || record["전용면적_㎡"] || 0),
+    floor: Number(record.floor || record.층 || record.동 || 0),
+    buildYear: Number(record.buildYear || record.건축년도 || record.준공년도 || 0),
     date: formatDealDate(year, month, day) || String(record.계약년월 || "").replace(/^(\d{4})(\d{2})$/, "$1-$2"),
     dateKey: Number(`${year || 0}${String(month || 0).padStart(2, "0")}${String(day || 0).padStart(2, "0")}`),
     raw: record,
@@ -1725,13 +1777,13 @@ function normalizeTradeRecord(record) {
 function normalizeRentRecord(record) {
   const [year, month, day] = extractMolitDate(record);
   return {
-    aptName: record.aptNm || record.아파트 || record.아파트명 || record.단지명 || record.aptName || "",
-    umdName: record.umdNm || record.법정동 || record.법정동읍면동 || "",
+    aptName: record.aptNm || record.아파트 || record.아파트명 || record.단지명 || record.aptName || record.단지 || "",
+    umdName: record.umdNm || record.법정동 || record.법정동읍면동 || record.읍면동 || "",
     sggCode: record.sggCd || "",
-    deposit: parseAmount(record.deposit || record.보증금액 || record.depositAmount),
-    monthlyRent: parseAmount(record.monthlyRent || record.월세금액 || record.monthlyRentAmount),
-    area: Number(record.excluUseAr || record.전용면적 || 0),
-    floor: Number(record.floor || record.층 || 0),
+    deposit: parseAmount(record.deposit || record.보증금액 || record.보증금 || record.depositAmount || record.전세금액),
+    monthlyRent: parseAmount(record.monthlyRent || record.월세금액 || record.월세 || record.monthlyRentAmount),
+    area: Number(record.excluUseAr || record.전용면적 || record["전용면적_㎡"] || 0),
+    floor: Number(record.floor || record.층 || record.동 || 0),
     date: formatDealDate(year, month, day) || String(record.계약년월 || "").replace(/^(\d{4})(\d{2})$/, "$1-$2"),
     dateKey: Number(`${year || 0}${String(month || 0).padStart(2, "0")}${String(day || 0).padStart(2, "0")}`),
     raw: record,
