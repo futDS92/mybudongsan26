@@ -5,7 +5,7 @@ module.exports = async function handler(req, res) {
 };
 
 async function handleMolitRequest(req, res, type, cache, digits, parseXml) {
-  const serviceKey = process.env.MOLIT_SERVICE_KEY || "";
+  const serviceKey = String(req.query?.serviceKey || process.env.MOLIT_SERVICE_KEY || "").trim();
   if (!serviceKey) {
     res.statusCode = 500;
     res.setHeader("Content-Type", "application/json; charset=utf-8");

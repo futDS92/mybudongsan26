@@ -659,12 +659,13 @@ function value(selector) {
   return document.querySelector(selector).value.trim();
 }
 
-function render() {
+function render(options = {}) {
+  const skipMap = Boolean(options.skipMap);
   renderSettings();
   renderSecurity();
   renderMetrics();
   renderRegionFilter();
-  renderMap();
+  if (!skipMap) renderMap();
   renderToday();
   renderTimeline();
   renderNews();
@@ -873,6 +874,7 @@ async function renderKakaoMarkers(properties) {
   kakaoMarkers = [];
 
   const resolved = await Promise.all(properties.map((property) => resolvePropertyCoordinate(property)));
+  let changed = false;
 
   resolved.forEach((property) => {
     if (!property?.lat || !property?.lng) return;
@@ -898,16 +900,23 @@ async function renderKakaoMarkers(properties) {
       label.addEventListener("click", () => editProperty(label.dataset.edit));
     });
   }, 0);
+
+  changed = resolved.some((item) => item?.changed);
+  const derivedChanged = await enrichLocationSignals();
+  if (changed || derivedChanged) {
+    render({ skipMap: true });
+  }
 }
 
 function resolvePropertyCoordinate(property) {
-  if (property.lat && property.lng && !shouldRefreshCoordinate(property)) return Promise.resolve(property);
-  if (!window.kakao?.maps?.services) return Promise.resolve(property);
+  if (property.lat && property.lng && !shouldRefreshCoordinate(property)) return Promise.resolve({ property, changed: false });
+  if (!window.kakao?.maps?.services) return Promise.resolve({ property, changed: false });
 
   const places = new kakao.maps.services.Places();
   const queries = buildPlaceQueries(property);
   return searchBestPlace(places, queries, property).then((place) => {
-    if (!place) return property;
+    if (!place) return { property, changed: false };
+    const before = `${property.lat || ""}:${property.lng || ""}:${property.region || ""}`;
     property.lat = Number(place.y);
     property.lng = Number(place.x);
     property.coordsSource = "kakao";
@@ -915,7 +924,8 @@ function resolvePropertyCoordinate(property) {
     property.kakaoAddress = place.address_name || place.road_address_name || "";
     property.region = property.region || property.kakaoAddress || "";
     saveState();
-    return property;
+    const after = `${property.lat || ""}:${property.lng || ""}:${property.region || ""}`;
+    return { property, changed: before !== after };
   });
 }
 
@@ -1493,7 +1503,7 @@ async function runMonitor() {
   )));
   const trades = tradeGroups.flat();
   const rents = rentGroups.flat();
-  await enrichLocationSignals();
+  const derivedChanged = await enrichLocationSignals();
   applyMolitRecords(trades, rents);
   updatePropertyHistories(trades, rents);
   const first = state.properties[0];
@@ -1516,6 +1526,7 @@ async function runMonitor() {
   state.newsLoading = false;
   saveState();
   render();
+  if (derivedChanged) render({ skipMap: true });
 }
 
 function getRecentDealMonths(baseMonth, count) {
@@ -1530,7 +1541,8 @@ function getRecentDealMonths(baseMonth, count) {
 }
 
 async function enrichLocationSignals() {
-  if (!window.kakao?.maps?.services) return;
+  if (!window.kakao?.maps?.services) return false;
+  let changed = false;
   await Promise.all(state.properties.map(async (property) => {
     if (!property.lat || !property.lng) return;
     if (!property.subwayDistance) {
@@ -1538,16 +1550,21 @@ async function enrichLocationSignals() {
       if (subway) {
         property.subwayDistance = Number(subway.distance || 0);
         property.nearestSubway = subway.place_name || "";
+        changed = true;
       }
     }
     if (!property.fitScore) {
       const score = getGbR001Score(property);
       property.fitScore = score?.score || 0;
       property.fitScoreSource = score?.source || "unsupported";
+      changed = true;
     } else if (!property.fitScoreSource) {
       property.fitScoreSource = getGbR001Score(property)?.source || "unsupported";
+      changed = true;
     }
   }));
+  if (changed) saveState();
+  return changed;
 }
 
 function findNearestSubway(property) {
@@ -1597,7 +1614,13 @@ function getMonitorLawdCodes() {
 
 async function fetchMolitRecords(type, lawdCode, dealMonth) {
   try {
-    const response = await fetch(`/api/molit/${type}?lawdCode=${encodeURIComponent(lawdCode)}&dealMonth=${encodeURIComponent(dealMonth)}`);
+    const serviceKey = state.settings.molitKey || privateConfig.molitKey || "";
+    const query = new URLSearchParams({
+      lawdCode,
+      dealMonth,
+    });
+    if (serviceKey) query.set("serviceKey", serviceKey);
+    const response = await fetch(`/api/molit/${type}?${query.toString()}`);
     if (!response.ok) throw new Error(`${type} API ${response.status}`);
     const xmlText = await response.text();
     return parseMolitXml(xmlText, type);
