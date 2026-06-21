@@ -1,6 +1,10 @@
 const { molitCache, onlyDigits, parseMolitXml } = require("../_lib");
 
 module.exports = async function handler(req, res) {
+  await handleMolitRequest(req, res, "trade", molitCache, onlyDigits, parseMolitXml);
+};
+
+async function handleMolitRequest(req, res, type, cache, digits, parseXml) {
   const serviceKey = process.env.MOLIT_SERVICE_KEY || "";
   if (!serviceKey) {
     res.statusCode = 500;
@@ -9,9 +13,8 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  const type = String(req.query?.type || req.url.split("/").pop() || "").replace(/[^a-z]/gi, "") === "rent" ? "rent" : "trade";
-  const lawdCode = onlyDigits(req.query?.lawdCode).slice(0, 5);
-  const dealMonth = onlyDigits(req.query?.dealMonth).slice(0, 6);
+  const lawdCode = digits(req.query?.lawdCode).slice(0, 5);
+  const dealMonth = digits(req.query?.dealMonth).slice(0, 6);
   if (lawdCode.length !== 5 || dealMonth.length !== 6) {
     res.statusCode = 400;
     res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -19,9 +22,7 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  const endpoint = type === "rent"
-    ? "https://apis.data.go.kr/1613000/RTMSDataSvcAptRent/getRTMSDataSvcAptRent"
-    : "https://apis.data.go.kr/1613000/RTMSDataSvcAptTradeDev/getRTMSDataSvcAptTradeDev";
+  const endpoint = "https://apis.data.go.kr/1613000/RTMSDataSvcAptTradeDev/getRTMSDataSvcAptTradeDev";
   const apiUrl = new URL(endpoint);
   apiUrl.searchParams.set("serviceKey", serviceKey);
   apiUrl.searchParams.set("LAWD_CD", lawdCode);
@@ -30,12 +31,12 @@ module.exports = async function handler(req, res) {
   apiUrl.searchParams.set("numOfRows", req.query?.numOfRows || "1000");
 
   const cacheKey = `${type}:${lawdCode}:${dealMonth}:${apiUrl.searchParams.get("pageNo")}:${apiUrl.searchParams.get("numOfRows")}`;
-  if (molitCache.has(cacheKey)) {
+  if (cache.has(cacheKey)) {
     res.statusCode = 200;
     res.setHeader("Content-Type", "application/xml; charset=utf-8");
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-Cache", "HIT");
-    res.end(molitCache.get(cacheKey));
+    res.end(cache.get(cacheKey));
     return;
   }
 
@@ -46,9 +47,9 @@ module.exports = async function handler(req, res) {
     },
   });
   const xml = await response.text();
-  if (response.ok) molitCache.set(cacheKey, xml);
+  if (response.ok) cache.set(cacheKey, xml);
   res.statusCode = response.ok ? 200 : response.status;
   res.setHeader("Content-Type", "application/xml; charset=utf-8");
   res.setHeader("Cache-Control", "no-store");
   res.end(xml);
-};
+}
