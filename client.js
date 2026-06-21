@@ -339,6 +339,10 @@ let kakaoMarkers = [];
 let detailPropertyId = null;
 let detailSelectedArea = null;
 let newsRequestSeq = 0;
+let deviceResizeTimer = null;
+const deviceState = {
+  profile: "",
+};
 const mapState = {
   centerLat: 37.4979,
   centerLng: 127.0276,
@@ -374,13 +378,41 @@ const views = {
 };
 
 document.addEventListener("DOMContentLoaded", () => {
+  updateDeviceProfile();
   bindNavigation();
   bindForms();
   render();
   setTimeout(() => {
     void runMonitor();
   }, 150);
+  window.addEventListener("resize", scheduleDeviceProfileUpdate);
+  window.addEventListener("orientationchange", scheduleDeviceProfileUpdate);
 });
+
+function updateDeviceProfile() {
+  const profile = getDeviceProfile();
+  if (deviceState.profile === profile) return;
+  deviceState.profile = profile;
+  document.documentElement.dataset.device = profile;
+  document.body.dataset.device = profile;
+}
+
+function scheduleDeviceProfileUpdate() {
+  window.clearTimeout(deviceResizeTimer);
+  deviceResizeTimer = window.setTimeout(() => {
+    updateDeviceProfile();
+    renderMap();
+  }, 120);
+}
+
+function getDeviceProfile() {
+  const width = window.innerWidth || document.documentElement.clientWidth || 1280;
+  const coarse = window.matchMedia?.("(pointer: coarse)")?.matches || false;
+  const touch = coarse || navigator.maxTouchPoints > 0;
+  if (width <= 760 || (touch && width <= 940)) return "mobile";
+  if (width <= 1320) return "laptop";
+  return "desktop";
+}
 
 function loadState() {
   const raw = localStorage.getItem(STORAGE_KEY);

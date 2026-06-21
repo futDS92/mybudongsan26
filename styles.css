@@ -760,6 +760,39 @@ label {
   color: var(--muted);
 }
 
+html[data-device="laptop"] .dashboard-layout {
+  grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.8fr);
+}
+
+html[data-device="laptop"] .property-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+html[data-device="laptop"] .news-feed {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+html[data-device="laptop"] .admin-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+html[data-device="desktop"] .map-area {
+  min-height: 560px;
+}
+
+html[data-device="mobile"] .main {
+  padding-bottom: 92px;
+}
+
+html[data-device="mobile"] .sidebar {
+  box-shadow: 0 -10px 24px rgba(0, 0, 0, 0.16);
+}
+
+html[data-device="mobile"] .nav-item {
+  font-size: 12px;
+  text-align: center;
+}
+
 @media (max-width: 1120px) {
   .app {
     grid-template-columns: 1fr;
