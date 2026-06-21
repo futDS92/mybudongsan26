@@ -802,9 +802,11 @@ function renderMap() {
   ));
   const kakaoKey = state.settings.kakaoKey || privateConfig.kakaoKey || "";
   const vworldKey = state.settings.vworldKey || privateConfig.vworldKey || "";
+  const molitKey = state.settings.molitKey || privateConfig.molitKey || "";
+  const keyStatus = `국토부 ${molitKey ? "설정됨" : "미설정"} · 지도 ${kakaoKey ? "Kakao" : vworldKey ? "VWorld" : "미설정"}`;
 
   if (kakaoKey) {
-    renderKakaoMap(map, properties, kakaoKey);
+    renderKakaoMap(map, properties, kakaoKey, keyStatus);
     return;
   }
 
@@ -815,6 +817,7 @@ function renderMap() {
         <strong>Kakao 또는 VWorld 지도 키가 필요합니다.</strong>
         <p>Admin에서 Kakao Map JavaScript 키를 저장하면 실제 카카오 지도 위에 관심 자산 마커가 표시됩니다. 로컬 테스트 도메인은 http://127.0.0.1:4177 입니다.</p>
         <p class="muted">기본 관심 구역은 4억 ~ 10억, 강남권 기준 반경 ${state.settings.interestRadiusKm || 15}km 입니다.</p>
+        <p class="muted">${keyStatus}</p>
       </div>
     </div>
   `;
@@ -856,7 +859,7 @@ function renderMap() {
       <button type="button" data-map-zoom="in" aria-label="확대">+</button>
       <button type="button" data-map-zoom="out" aria-label="축소">-</button>
     </div>
-    <div class="map-note">VWorld Base · zoom ${mapState.zoom} · 기본 구역 ${formatPrice(state.settings.interestPriceMin)} ~ ${formatPrice(state.settings.interestPriceMax)}</div>
+    <div class="map-note">VWorld Base · zoom ${mapState.zoom} · 기본 구역 ${formatPrice(state.settings.interestPriceMin)} ~ ${formatPrice(state.settings.interestPriceMax)} · ${keyStatus}</div>
   `;
 
   map.querySelectorAll("[data-edit]").forEach((button) => {
@@ -872,10 +875,10 @@ function renderMap() {
   });
 }
 
-function renderKakaoMap(container, properties, kakaoKey) {
+function renderKakaoMap(container, properties, kakaoKey, keyStatus = "") {
   container.innerHTML = `
     <div class="kakao-map" id="kakaoMap"></div>
-    <div class="map-note">Kakao Map · 관심 자산 ${properties.length}개</div>
+    <div class="map-note">Kakao Map · 관심 자산 ${properties.length}개${keyStatus ? ` · ${keyStatus}` : ""}</div>
   `;
 
   loadKakaoSdk(kakaoKey)
