@@ -19,6 +19,8 @@ docker run --rm -p 4177:4177 \
   real-estate-monitor
 ```
 
+Vercel로 배포할 때는 저장소를 연결한 뒤 프로젝트 환경변수에 `MOLIT_SERVICE_KEY`를 넣으면 됩니다. 정적 파일은 루트에서 서빙되고, `/api/news`와 `/api/molit/*`는 Vercel Serverless Function이 처리합니다.
+
 ## 현재 포함된 기능
 
 - 대시보드: 관심 자산 수, 평균 변동률, 미확인 알림, 임장 완료 수
