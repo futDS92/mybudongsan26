@@ -49,7 +49,7 @@ async function serveStatic(pathname, res) {
 }
 
 async function handleMolit(url, res) {
-  const serviceKey = process.env.MOLIT_SERVICE_KEY || "";
+  const serviceKey = normalizeServiceKey(url.searchParams.get("serviceKey") || process.env.MOLIT_SERVICE_KEY || "");
   if (!serviceKey) {
     res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({ error: "MOLIT_SERVICE_KEY is not configured" }));
@@ -244,4 +244,15 @@ function clampNumber(value, min, max, fallback) {
 
 function onlyDigits(value) {
   return String(value || "").replace(/\D/g, "");
+}
+
+function normalizeServiceKey(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (!raw.includes("%")) return raw;
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
 }
