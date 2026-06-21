@@ -18,6 +18,17 @@ function splitKeywords(value) {
     .filter(Boolean);
 }
 
+function normalizeServiceKey(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (!raw.includes("%")) return raw;
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
 function buildNewsQuery(keyword, keywords) {
   const extra = keywords.filter((item) => item !== keyword).slice(0, 3);
   return [keyword, ...extra].join(" ").trim();
@@ -153,5 +164,6 @@ module.exports = {
   onlyDigits,
   parseMolitXml,
   parseRssFeed,
+  normalizeServiceKey,
   splitKeywords,
 };

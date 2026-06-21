@@ -1,11 +1,11 @@
-const { molitCache, onlyDigits, parseMolitXml } = require("../_lib");
+const { molitCache, normalizeServiceKey, onlyDigits, parseMolitXml } = require("../_lib");
 
 module.exports = async function handler(req, res) {
   await handleMolitRequest(req, res, "trade", molitCache, onlyDigits, parseMolitXml);
 };
 
 async function handleMolitRequest(req, res, type, cache, digits, parseXml) {
-  const serviceKey = String(req.query?.serviceKey || process.env.MOLIT_SERVICE_KEY || "").trim();
+  const serviceKey = normalizeServiceKey(req.query?.serviceKey || process.env.MOLIT_SERVICE_KEY || "");
   if (!serviceKey) {
     res.statusCode = 500;
     res.setHeader("Content-Type", "application/json; charset=utf-8");
