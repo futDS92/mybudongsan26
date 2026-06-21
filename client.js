@@ -194,7 +194,7 @@ const defaultState = {
     {
       id: "p-6",
       name: "성남코오롱하늘채아파트",
-      region: "경기 성남시 중원구",
+      region: "경기 성남시 수정구 단대동",
       type: "아파트",
       area: 84,
       baseArea: 84,
@@ -209,7 +209,7 @@ const defaultState = {
       subwayDistance: 0,
       tags: ["성남", "관심단지"],
       aliases: ["코오롱하늘채", "코오롱하늘채아파트 성남", "성남 코오롱하늘채", "성남코오롱하늘채", "성남코오롱하늘채아파트", "코오롱하늘채아파트"],
-      expectedDistricts: ["성남", "중원구", "은행동"],
+      expectedDistricts: ["성남", "수정구", "단대동"],
       risk: "실거래와 임장 정보 입력 필요.",
       x: 56,
       y: 52,
@@ -1620,11 +1620,12 @@ async function runMonitor() {
   }
   if (first) {
     const latest = fetchedNews[0] || state.news[0];
-    if (!latest) return;
-    createAlert(first.id, "news", "관심 키워드 뉴스 감지", `${latest.keyword} 관련 뉴스가 추가되었습니다.`);
+    if (latest) {
+      createAlert(first.id, "news", "관심 키워드 뉴스 감지", `${latest.keyword} 관련 뉴스가 추가되었습니다.`);
+      addTimeline(first.id, "뉴스", `${latest.keyword} 키워드 뉴스가 수집되었습니다.`);
+    }
     addTimeline(first.id, "국토부", `${lawdCodes.join(", ")} 최근 ${dealMonths.length}개월 매매 ${trades.length}건, 전월세 ${rents.length}건을 조회했습니다.`);
     addTimeline(first.id, "VWorld", `${state.settings.lawdCode || "시군구"} 시군구 경계 레이어 기준으로 지도 영역을 갱신했습니다.`);
-    addTimeline(first.id, "뉴스", `${latest.keyword} 키워드 뉴스가 수집되었습니다.`);
   }
   state.monitorSummary = {
     tradeCount: allTrades.length,
