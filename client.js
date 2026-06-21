@@ -692,11 +692,12 @@ function renderSecurity() {
 }
 
 function renderSettings() {
-  document.querySelector("#molitStatus").textContent = state.settings.molitKey ? "설정됨" : "키 미설정";
+  const effectiveMolitKey = state.settings.molitKey || privateConfig.molitKey || "";
+  document.querySelector("#molitStatus").textContent = effectiveMolitKey ? "설정됨" : "키 미설정";
   document.querySelector("#molitEndpoint").value = state.settings.molitEndpoint || defaultState.settings.molitEndpoint;
   document.querySelector("#rentEndpoint").value = state.settings.rentEndpoint || defaultState.settings.rentEndpoint;
   document.querySelector("#vworldEndpoint").value = buildVworldBoundaryUrl({ includeKey: false });
-  document.querySelector("#molitKey").value = state.settings.molitKey;
+  document.querySelector("#molitKey").value = effectiveMolitKey;
   document.querySelector("#kakaoKey").value = state.settings.kakaoKey || "";
   document.querySelector("#vworldKey").value = state.settings.vworldKey || "";
   document.querySelector("#vworldDomain").value = state.settings.vworldDomain || "";
