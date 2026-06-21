@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' https://dapi.kakao.com https://*.daumcdn.net http://*.daumcdn.net https://*.kakao.com http://*.kakao.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://api.vworld.kr https://*.daumcdn.net http://*.daumcdn.net https://*.kakaocdn.net http://*.kakaocdn.net https://*.kakao.com http://*.kakao.com; connect-src 'self' https://apis.data.go.kr https://api.vworld.kr https://dapi.kakao.com https://*.kakao.com http://*.kakao.com https://*.daumcdn.net http://*.daumcdn.net; font-src 'self' data: https://*.kakao.com http://*.kakao.com https://*.daumcdn.net http://*.daumcdn.net; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'" />
+    <meta name="referrer" content="origin" />
+    <title>부동산 모니터</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark">RE</span>
+          <div>
+            <strong>부동산 모니터</strong>
+            <small>실거래·임장·뉴스 감시</small>
+          </div>
+        </div>
+
+        <nav class="nav" aria-label="주 메뉴">
+          <button class="nav-item active" data-view="dashboard">대시보드</button>
+          <button class="nav-item" data-view="watchlist">관심 목록</button>
+          <button class="nav-item" data-view="field">임장 기록</button>
+          <button class="nav-item" data-view="alerts">알림</button>
+          <button class="nav-item" data-view="admin">Admin</button>
+        </nav>
+
+        <section class="panel compact">
+          <div class="panel-title">데이터 소스</div>
+          <div class="source-row">
+            <span>국토부 실거래가</span>
+            <b id="molitStatus">키 미설정</b>
+          </div>
+          <div class="source-row">
+            <span>뉴스 수집</span>
+            <b>RSS</b>
+          </div>
+        </section>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <h1 id="viewTitle">대시보드</h1>
+            <p id="viewSubtitle">관심 부동산의 가격, 뉴스, 임장 상태를 한 화면에서 확인합니다.</p>
+          </div>
+          <div class="top-actions">
+            <button class="ghost" id="seedButton">샘플 복원</button>
+            <button class="primary" data-view-jump="admin">정보 입력</button>
+          </div>
+        </header>
+
+        <section class="view active" id="dashboardView">
+          <div class="metric-grid">
+            <div class="metric">
+              <small>관심 자산</small>
+              <strong id="metricProperties">0</strong>
+            </div>
+            <div class="metric">
+              <small>최근 30일 변동</small>
+              <strong id="metricChange">0%</strong>
+            </div>
+            <div class="metric">
+              <small>미확인 알림</small>
+              <strong id="metricAlerts">0</strong>
+            </div>
+            <div class="metric">
+              <small>임장 완료</small>
+              <strong id="metricVisits">0</strong>
+            </div>
+          </div>
+
+          <div class="dashboard-layout">
+            <section class="map-area" aria-label="지도">
+              <div class="map-toolbar">
+                <div>
+                  <strong>관심 지도</strong>
+                  <small>시세 변화가 큰 곳은 진하게 표시됩니다.</small>
+                </div>
+                <div class="map-search">
+                  <input id="mapSearch" placeholder="아파트명 검색" />
+                  <button class="primary" id="mapSearchButton" type="button">마커 추가</button>
+                  <select id="regionFilter" aria-label="지역 필터"></select>
+                </div>
+              </div>
+              <div class="map-canvas" id="mapCanvas"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-title">오늘 볼 항목</div>
+              <div id="todayList" class="stack"></div>
+            </section>
+          </div>
+
+          <section class="panel full">
+            <div class="panel-title">최근 실거래/뉴스 변화</div>
+            <div class="timeline" id="timeline"></div>
+          </section>
+
+          <section class="panel full">
+            <div class="panel-title">관심 키워드 뉴스</div>
+            <div class="news-feed" id="newsFeed"></div>
+          </section>
+        </section>
+
+        <section class="view" id="watchlistView">
+          <div class="table-actions">
+            <input id="watchSearch" placeholder="단지명, 지역, 태그 검색" />
+            <button class="primary" data-view-jump="admin">관심 자산 추가</button>
+          </div>
+          <div class="property-grid" id="propertyGrid"></div>
+        </section>
+
+        <section class="view" id="fieldView">
+          <div class="split">
+            <section class="panel">
+              <div class="panel-title">임장 기록</div>
+              <div id="visitList" class="stack"></div>
+            </section>
+            <section class="panel">
+              <div class="panel-title">체크리스트 기준</div>
+              <div class="checklist">
+                <label><input type="checkbox" checked disabled /> 역/버스 접근성</label>
+                <label><input type="checkbox" checked disabled /> 소음·냄새·채광</label>
+                <label><input type="checkbox" checked disabled /> 단지 관리상태</label>
+                <label><input type="checkbox" checked disabled /> 학군·상권·병원</label>
+                <label><input type="checkbox" checked disabled /> 매수 리스크 메모</label>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="alertsView">
+          <div class="table-actions">
+            <button class="ghost" id="markReadButton">모두 읽음</button>
+            <button class="primary" id="runMonitorButton">모니터링 실행</button>
+          </div>
+          <div class="alerts" id="alertList"></div>
+        </section>
+
+        <section class="view" id="adminView">
+          <div class="admin-grid">
+            <form class="panel form security-panel" id="securityForm" hidden>
+              <div class="panel-title">보안 설정</div>
+              <p id="securityStatus" class="muted">Admin 잠금 상태를 확인합니다.</p>
+              <label>Admin 패스코드<input id="adminPasscode" type="password" autocomplete="current-password" minlength="6" placeholder="6자 이상" /></label>
+              <div class="form-actions">
+                <button type="button" class="ghost" id="lockAdminButton">잠금</button>
+                <button type="submit" class="primary" id="unlockAdminButton">해제/설정</button>
+              </div>
+            </form>
+
+            <form class="panel form" id="propertyForm">
+              <div class="panel-title">관심 자산 편집</div>
+              <input type="hidden" id="propertyId" />
+              <label>자산명<input id="propertyName" required placeholder="예: 래미안 원베일리" /></label>
+              <label>지역<input id="propertyRegion" required placeholder="예: 서울 서초구 반포동" /></label>
+              <label>유형
+                <select id="propertyType">
+                  <option>아파트</option>
+                  <option>오피스텔</option>
+                  <option>연립/다세대</option>
+                  <option>단독/다가구</option>
+                  <option>상가</option>
+                  <option>토지</option>
+                </select>
+              </label>
+              <label>전용면적(㎡)<input id="propertyArea" type="number" min="1" step="0.01" required /></label>
+              <label>기본 평형(㎡)<input id="propertyBaseArea" type="number" min="1" step="0.01" placeholder="기본 84" /></label>
+              <label>최근 실거래가(만원)<input id="propertyPrice" type="number" min="0" step="100" required /></label>
+              <label>30일 변동률(%)<input id="propertyChange" type="number" step="0.1" required /></label>
+              <label>입지 적합도 점수<input id="propertyFitScore" type="number" min="0" max="10" step="0.1" placeholder="gb_r001 TOT_SCR 기준" /></label>
+              <label>지하철역 거리(m)<input id="propertySubwayDistance" type="number" min="0" step="1" placeholder="gb_r001 SBW_DST 기준" /></label>
+              <label>위도<input id="propertyLat" type="number" step="0.000001" placeholder="예: 37.503800" /></label>
+              <label>경도<input id="propertyLng" type="number" step="0.000001" placeholder="예: 127.002600" /></label>
+              <label>태그<input id="propertyTags" placeholder="재건축, 역세권, 학군" /></label>
+              <label>위험 메모<textarea id="propertyRisk" rows="3" placeholder="권리, 누수, 소음, 호재 과열 등"></textarea></label>
+              <div class="form-actions">
+                <button type="button" class="ghost" id="clearPropertyButton">새로 입력</button>
+                <button class="primary" type="submit">저장</button>
+              </div>
+            </form>
+
+            <form class="panel form" id="visitForm">
+              <div class="panel-title">임장 정보 입력</div>
+              <label>자산 선택<select id="visitProperty"></select></label>
+              <label>방문일<input id="visitDate" type="date" required /></label>
+              <label>평점<input id="visitScore" type="number" min="1" max="5" step="0.5" required /></label>
+              <label>체크 메모<textarea id="visitNote" rows="4" required placeholder="교통, 소음, 관리상태, 주변 인프라"></textarea></label>
+              <button class="primary" type="submit">임장 저장</button>
+            </form>
+
+            <form class="panel form" id="sourceForm">
+              <div class="panel-title">외부 정보 설정</div>
+              <label>국토부 매매 API 엔드포인트<input id="molitEndpoint" readonly /></label>
+              <label>국토부 전월세 API 엔드포인트<input id="rentEndpoint" readonly /></label>
+              <label>VWorld 시군구 경계 API<input id="vworldEndpoint" readonly /></label>
+              <label>국토부 OpenAPI 키<input id="molitKey" type="password" autocomplete="off" placeholder="공공데이터포털 서비스키" /></label>
+              <label>Kakao Map JavaScript 키<input id="kakaoKey" type="password" autocomplete="off" placeholder="카카오 JavaScript 키" /></label>
+              <label>VWorld API 키<input id="vworldKey" type="password" autocomplete="off" placeholder="브이월드 인증키" /></label>
+              <label>VWorld 도메인<input id="vworldDomain" placeholder="인증키 발급 시 등록한 URL" /></label>
+              <label>법정동 코드 앞 5자리<input id="lawdCode" inputmode="numeric" maxlength="5" placeholder="예: 서울 종로구 11110" /></label>
+              <label>계약년월<input id="dealMonth" inputmode="numeric" maxlength="6" placeholder="예: 202606" /></label>
+              <label>기본 관심 가격 하한(만원)<input id="interestPriceMin" type="number" min="0" step="100" placeholder="예: 40000" /></label>
+              <label>기본 관심 가격 상한(만원)<input id="interestPriceMax" type="number" min="0" step="100" placeholder="예: 100000" /></label>
+              <label>강남권 반경(km)<input id="interestRadiusKm" type="number" min="1" step="1" placeholder="예: 15" /></label>
+              <label>뉴스 키워드<textarea id="newsKeywords" rows="3" placeholder="지역명, 단지명, 개발사업명"></textarea></label>
+              <label>뉴스 수집 API 엔드포인트<input id="newsEndpoint" placeholder="예: /api/news?keyword=" /></label>
+              <label>가격 알림 기준(%)<input id="alertThreshold" type="number" min="0.1" step="0.1" /></label>
+              <button class="primary" type="submit">설정 저장</button>
+            </form>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="detail-modal" id="detailModal" hidden>
+      <div class="detail-backdrop" data-close-detail></div>
+      <section class="detail-panel">
+        <div class="detail-head">
+          <div>
+            <div class="detail-kicker">상세</div>
+            <h2 id="detailTitle">단지 상세</h2>
+            <p id="detailMeta"></p>
+          </div>
+          <button class="ghost" data-close-detail>닫기</button>
+        </div>
+        <div class="detail-controls">
+          <label>
+            평형 선택
+            <select id="detailAreaSelect"></select>
+          </label>
+          <button class="primary" id="detailRefreshButton" type="button">시세 검색</button>
+        </div>
+        <div class="detail-stats" id="detailStats"></div>
+        <div class="detail-chart-wrap">
+          <svg id="detailChart" viewBox="0 0 720 280" preserveAspectRatio="none" aria-label="최근 12개월 시세 그래프"></svg>
+        </div>
+        <div class="detail-table-wrap">
+          <table class="detail-table">
+            <thead>
+              <tr>
+                <th>월</th>
+                <th>평형</th>
+                <th>실거래가</th>
+                <th>전월세</th>
+                <th>층</th>
+              </tr>
+            </thead>
+            <tbody id="detailRows"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <script src="./private-config.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,6 @@
+.git
+.gitignore
+.DS_Store
+private-config.js
+node_modules
+*.log
