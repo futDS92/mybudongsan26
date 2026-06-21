@@ -2,12 +2,7 @@
   "version": 2,
   "functions": {
     "index.js": {
-      "includeFiles": [
-        "index.html",
-        "styles.css",
-        "client.js",
-        "config.js"
-      ]
+      "includeFiles": "{index.html,styles.css,client.js,config.js}"
     }
   },
   "rewrites": [
