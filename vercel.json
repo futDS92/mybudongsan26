@@ -1,9 +1,17 @@
 {
   "version": 2,
-  "buildCommand": "node build.mjs",
-  "outputDirectory": "public",
+  "functions": {
+    "index.js": {
+      "includeFiles": [
+        "index.html",
+        "styles.css",
+        "client.js",
+        "config.js"
+      ]
+    }
+  },
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/$1" },
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/(.*)", "destination": "/index.js" }
   ]
 }
