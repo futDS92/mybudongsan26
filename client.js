@@ -299,35 +299,7 @@ const defaultState = {
   },
   propertyTradeHistory: {},
   propertyRentHistory: {},
-  news: [
-    {
-      id: "n-1",
-      propertyId: "p-1",
-      keyword: "반포동",
-      title: "반포동 대단지 거래 회복세 점검",
-      summary: "최근 매매 신고와 전세가 흐름을 함께 확인해야 하는 구간입니다.",
-      source: "키워드 모니터",
-      at: "2026-06-21",
-    },
-    {
-      id: "n-2",
-      propertyId: "p-2",
-      keyword: "광명뉴타운",
-      title: "광명뉴타운 입주 물량과 전월세 흐름",
-      summary: "신축 선호와 입주 물량이 동시에 작용하는 지역으로 임장 재확인이 필요합니다.",
-      source: "키워드 모니터",
-      at: "2026-06-20",
-    },
-    {
-      id: "n-3",
-      propertyId: "p-3",
-      keyword: "아현동",
-      title: "아현동 도심 접근성 관련 관심 증가",
-      summary: "역세권과 대단지 프리미엄이 가격 방어 요인으로 관찰됩니다.",
-      source: "키워드 모니터",
-      at: "2026-06-19",
-    },
-  ],
+  news: [],
   timeline: [
     {
       id: "t-1",
@@ -1307,12 +1279,14 @@ function renderNews() {
 
   feed.innerHTML = news.length ? news.map((item) => {
     const property = findProperty(item.propertyId);
+    const title = cleanNewsText(item.title);
+    const summary = cleanNewsText(item.summary).slice(0, 180);
     return `
       <article class="news-card">
-        <span class="badge">${escapeHtml(item.keyword)}</span>
-        <strong>${escapeHtml(item.title)}</strong>
-        <p>${escapeHtml(item.summary)}</p>
-        <div class="muted">${escapeHtml(property?.name || "관심 지역")} · ${escapeHtml(item.source)} · ${escapeHtml(item.at)}</div>
+        <span class="badge">${escapeHtml(cleanNewsText(item.keyword))}</span>
+        <strong>${escapeHtml(title)}</strong>
+        <p>${escapeHtml(summary)}</p>
+        <div class="muted">${escapeHtml(property?.name || "관심 지역")} · ${escapeHtml(cleanNewsText(item.source))} · ${escapeHtml(item.at)}</div>
       </article>
     `;
   }).join("") : `<p>관심목록 또는 뉴스 키워드와 매칭된 뉴스가 없습니다.</p>`;
@@ -1640,10 +1614,9 @@ async function runMonitor() {
   const fetchedNews = await collectNewsItems();
   if (requestId !== newsRequestSeq) return;
   if (fetchedNews.length) {
-    state.news = mergeNewsItems(fetchedNews, state.news).slice(0, 30);
+    state.news = mergeNewsItems(fetchedNews, state.news.filter((item) => !isSampleNews(item))).slice(0, 30);
   } else if (first) {
-    const news = createKeywordNews(first);
-    state.news = [news, ...state.news].slice(0, 30);
+    state.news = state.news.filter((item) => !isSampleNews(item)).slice(0, 30);
   }
   if (first) {
     const latest = fetchedNews[0] || state.news[0];
@@ -2024,10 +1997,10 @@ function normalizeNewsPayload(payload, keyword) {
   return items.map((item) => ({
     id: item.id || `n-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     propertyId: item.propertyId || inferPropertyId(item, keyword),
-    keyword: item.keyword || keyword,
-    title: item.title || item.headline || `${keyword} 관련 뉴스`,
-    summary: item.summary || item.description || item.content || "",
-    source: item.source || item.publisher || "외부 수집",
+    keyword: cleanNewsText(item.keyword || keyword),
+    title: cleanNewsText(item.title || item.headline || `${keyword} 관련 뉴스`),
+    summary: cleanNewsText(item.summary || item.description || item.content || ""),
+    source: cleanNewsText(item.source || item.publisher || "외부 수집"),
     at: item.at || item.publishedAt || item.date || new Date().toISOString().slice(0, 10),
   }));
 }
@@ -2044,10 +2017,31 @@ function inferPropertyId(item, keyword) {
 function mergeNewsItems(freshItems, existingItems) {
   const byKey = new Map();
   [...freshItems, ...existingItems].forEach((item) => {
-    const key = [item.title, item.keyword, item.at, item.propertyId].join("|");
-    if (!byKey.has(key)) byKey.set(key, item);
+    if (isSampleNews(item)) return;
+    const normalized = {
+      ...item,
+      keyword: cleanNewsText(item.keyword),
+      title: cleanNewsText(item.title),
+      summary: cleanNewsText(item.summary),
+      source: cleanNewsText(item.source),
+    };
+    const key = [normalizeText(normalized.title), normalized.at, normalized.propertyId].join("|");
+    if (!byKey.has(key)) byKey.set(key, normalized);
   });
   return [...byKey.values()].sort((a, b) => String(b.at).localeCompare(String(a.at)));
+}
+
+function isSampleNews(item) {
+  return item?.source === "키워드 모니터";
+}
+
+function cleanNewsText(value) {
+  const textarea = document.createElement("textarea");
+  textarea.innerHTML = String(value || "");
+  return textarea.value
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function createAlert(propertyId, type, title, body) {
