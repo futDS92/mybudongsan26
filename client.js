@@ -1707,31 +1707,33 @@ function parseMolitXml(xmlText, type) {
 }
 
 function normalizeTradeRecord(record) {
+  const [year, month, day] = extractMolitDate(record);
   return {
-    aptName: record.aptNm || record.아파트 || record.aptName || "",
-    umdName: record.umdNm || record.법정동 || "",
+    aptName: record.aptNm || record.아파트 || record.아파트명 || record.단지명 || record.aptName || "",
+    umdName: record.umdNm || record.법정동 || record.법정동읍면동 || "",
     sggCode: record.sggCd || record.roadNmSggCd || "",
     amount: parseAmount(record.dealAmount || record.거래금액 || record.dealAmt),
     area: Number(record.excluUseAr || record.전용면적 || 0),
     floor: Number(record.floor || record.층 || 0),
     buildYear: Number(record.buildYear || record.건축년도 || 0),
-    date: formatDealDate(record.dealYear, record.dealMonth, record.dealDay),
-    dateKey: Number(`${record.dealYear || 0}${String(record.dealMonth || 0).padStart(2, "0")}${String(record.dealDay || 0).padStart(2, "0")}`),
+    date: formatDealDate(year, month, day) || String(record.계약년월 || "").replace(/^(\d{4})(\d{2})$/, "$1-$2"),
+    dateKey: Number(`${year || 0}${String(month || 0).padStart(2, "0")}${String(day || 0).padStart(2, "0")}`),
     raw: record,
   };
 }
 
 function normalizeRentRecord(record) {
+  const [year, month, day] = extractMolitDate(record);
   return {
-    aptName: record.aptNm || record.아파트 || record.aptName || "",
-    umdName: record.umdNm || record.법정동 || "",
+    aptName: record.aptNm || record.아파트 || record.아파트명 || record.단지명 || record.aptName || "",
+    umdName: record.umdNm || record.법정동 || record.법정동읍면동 || "",
     sggCode: record.sggCd || "",
     deposit: parseAmount(record.deposit || record.보증금액 || record.depositAmount),
     monthlyRent: parseAmount(record.monthlyRent || record.월세금액 || record.monthlyRentAmount),
     area: Number(record.excluUseAr || record.전용면적 || 0),
     floor: Number(record.floor || record.층 || 0),
-    date: formatDealDate(record.dealYear, record.dealMonth, record.dealDay),
-    dateKey: Number(`${record.dealYear || 0}${String(record.dealMonth || 0).padStart(2, "0")}${String(record.dealDay || 0).padStart(2, "0")}`),
+    date: formatDealDate(year, month, day) || String(record.계약년월 || "").replace(/^(\d{4})(\d{2})$/, "$1-$2"),
+    dateKey: Number(`${year || 0}${String(month || 0).padStart(2, "0")}${String(day || 0).padStart(2, "0")}`),
     raw: record,
   };
 }
@@ -1874,6 +1876,13 @@ function parseAmount(value) {
 
 function onlyDigits(value) {
   return String(value || "").replace(/\D/g, "");
+}
+
+function extractMolitDate(record) {
+  const year = Number(record.dealYear || record.년 || record.contractYear || 0);
+  const month = Number(record.dealMonth || record.월 || record.contractMonth || 0);
+  const day = Number(record.dealDay || record.일 || record.contractDay || 0);
+  return [year, month, day];
 }
 
 function formatDealDate(year, month, day) {
