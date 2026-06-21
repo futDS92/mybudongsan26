@@ -1,5 +1,5 @@
 const STORAGE_KEY = "realEstateMonitor:v1";
-const privateConfig = window.REM_PRIVATE_CONFIG || {};
+let privateConfig = window.REM_PRIVATE_CONFIG || {};
 
 const defaultState = {
   sourceDatasets: [
@@ -330,7 +330,7 @@ const defaultState = {
   ],
 };
 
-let state = loadState();
+let state = null;
 let adminUnlocked = true;
 let adminAutoLockTimer = null;
 let kakaoSdkPromise = null;
@@ -377,7 +377,9 @@ const views = {
   },
 };
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
+  await hydratePrivateConfig();
+  state = loadState();
   updateDeviceProfile();
   bindNavigation();
   bindForms();
@@ -388,6 +390,22 @@ document.addEventListener("DOMContentLoaded", () => {
   window.addEventListener("resize", scheduleDeviceProfileUpdate);
   window.addEventListener("orientationchange", scheduleDeviceProfileUpdate);
 });
+
+async function hydratePrivateConfig() {
+  if (privateConfig?.molitKey || privateConfig?.kakaoKey || privateConfig?.vworldKey) return;
+  try {
+    const response = await fetch("/api/config", { headers: { Accept: "application/json" } });
+    if (!response.ok) return;
+    const payload = await response.json();
+    privateConfig = {
+      ...privateConfig,
+      ...payload,
+    };
+    window.REM_PRIVATE_CONFIG = privateConfig;
+  } catch {
+    // 배포 환경에서만 쓰는 보조 경로다. 실패해도 기존 동작을 유지한다.
+  }
+}
 
 function updateDeviceProfile() {
   const profile = getDeviceProfile();
