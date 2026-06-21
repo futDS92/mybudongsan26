@@ -113,6 +113,19 @@ button {
   margin-bottom: 24px;
 }
 
+.topbar p,
+.panel-title,
+.metric small,
+.source-row span,
+.card-meta,
+.news-card p,
+.timeline-item p,
+.visit p,
+.alert p,
+.today-item p {
+  line-height: 1.45;
+}
+
 h1 {
   margin: 0 0 6px;
   font-size: 28px;
@@ -753,11 +766,17 @@ label {
   }
 
   .sidebar {
-    position: static;
+    position: sticky;
+    top: 0;
+    z-index: 20;
     height: auto;
     display: grid;
-    gap: 14px;
-    padding: 16px 14px 12px;
+    gap: 12px;
+    padding: 14px 14px 10px;
+  }
+
+  .brand {
+    margin-bottom: 0;
   }
 
   .nav {
@@ -824,8 +843,12 @@ label {
 }
 
 @media (max-width: 720px) {
+  body {
+    background: #eef2f3;
+  }
+
   .main {
-    padding: 14px;
+    padding: 12px 12px 88px;
   }
 
   .brand {
@@ -837,17 +860,45 @@ label {
     gap: 10px;
   }
 
+  .sidebar {
+    top: auto;
+    bottom: 0;
+    position: fixed;
+    left: 0;
+    right: 0;
+    display: block;
+    padding: 8px 10px 10px;
+    background: rgba(16, 35, 40, 0.98);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 -10px 24px rgba(0, 0, 0, 0.16);
+  }
+
+  .sidebar .brand,
+  .sidebar .panel.compact {
+    display: none;
+  }
+
   .nav {
+    margin-bottom: 0;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(72px, 1fr);
+    gap: 6px;
+    overflow-x: auto;
     padding-bottom: 0;
   }
 
   .nav-item {
-    min-height: 36px;
-    padding: 9px 11px;
+    min-height: 44px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    text-align: center;
+    font-size: 12px;
   }
 
   .topbar {
     gap: 10px;
+    margin-bottom: 16px;
   }
 
   .top-actions {
@@ -865,6 +916,14 @@ label {
 
   .map-toolbar {
     padding: 14px;
+  }
+
+  .map-toolbar strong {
+    font-size: 15px;
+  }
+
+  .map-toolbar small {
+    font-size: 12px;
   }
 
   .map-search {
@@ -891,6 +950,19 @@ label {
   .map-label {
     min-width: 118px;
     font-size: 12px;
+  }
+
+  .metric {
+    padding: 14px;
+  }
+
+  .metric strong {
+    font-size: 24px;
+  }
+
+  .panel-title {
+    margin-bottom: 12px;
+    font-size: 15px;
   }
 
   .property-grid,
@@ -940,5 +1012,13 @@ label {
   .detail-table th,
   .detail-table td {
     padding: 8px 6px;
+  }
+
+  .source-row {
+    padding: 10px 0;
+  }
+
+  .source-row b {
+    font-size: 12px;
   }
 }
