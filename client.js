@@ -826,25 +826,18 @@ function renderMap() {
     return;
   }
 
-  if (!vworldKey) {
-    map.innerHTML = `
-      <div class="map-setup">
-      <div class="map-setup-box">
-        <strong>지도를 준비하는 중입니다.</strong>
-        <p>지도 설정은 기본값으로 포함되어 있습니다. 네트워크 또는 브라우저 캐시 때문에 로드가 지연될 수 있습니다.</p>
-        <p class="muted">기본 관심 구역은 4억 ~ 10억, 강남권 기준 반경 ${state.settings.interestRadiusKm || 15}km 입니다.</p>
-        <p class="muted">${keyStatus}</p>
-      </div>
-    </div>
-  `;
-    return;
-  }
+  renderRasterMap(map, properties, vworldKey ? "VWorld" : "OSM", vworldKey);
+}
 
+function renderRasterMap(map, properties, provider = "OSM", vworldKey = "") {
   const size = getMapSize(map);
   const center = latLngToPixel(mapState.centerLat, mapState.centerLng, mapState.zoom);
   const left = center.x - size.width / 2;
   const top = center.y - size.height / 2;
   const tiles = getVisibleTiles(left, top, size, mapState.zoom);
+  const tileUrl = provider === "VWorld"
+    ? (tile) => getVworldTileUrl(tile.x, tile.y, tile.z, vworldKey)
+    : (tile) => getOsmTileUrl(tile.x, tile.y, tile.z);
 
   map.innerHTML = `
     <div class="tile-layer">
@@ -853,7 +846,7 @@ function renderMap() {
           class="map-tile"
           alt=""
           draggable="false"
-          src="${escapeHtml(getVworldTileUrl(tile.x, tile.y, tile.z, vworldKey))}"
+          src="${escapeHtml(tileUrl(tile))}"
           style="left:${tile.left}px;top:${tile.top}px"
         />
       `).join("")}
@@ -875,7 +868,7 @@ function renderMap() {
       <button type="button" data-map-zoom="in" aria-label="확대">+</button>
       <button type="button" data-map-zoom="out" aria-label="축소">-</button>
     </div>
-    <div class="map-note">VWorld Base · zoom ${mapState.zoom} · 기본 구역 ${formatPrice(state.settings.interestPriceMin)} ~ ${formatPrice(state.settings.interestPriceMax)} · ${keyStatus}</div>
+    <div class="map-note">${provider} · zoom ${mapState.zoom} · 기본 구역 ${formatPrice(state.settings.interestPriceMin)} ~ ${formatPrice(state.settings.interestPriceMax)}</div>
   `;
 
   map.querySelectorAll("[data-edit]").forEach((button) => {
@@ -924,15 +917,9 @@ function renderKakaoMap(container, properties, kakaoKey, keyStatus = "") {
       renderKakaoMarkers(properties);
     })
     .catch((error) => {
-      container.innerHTML = `
-        <div class="map-setup">
-          <div class="map-setup-box">
-            <strong>Kakao Map을 불러오지 못했습니다.</strong>
-            <p>Kakao Developers에서 해당 앱의 지도/로컬 API 사용 설정을 활성화하세요. SDK 응답 기준으로 OPEN_MAP_AND_LOCAL 서비스가 비활성 상태일 수 있습니다.</p>
-            <p class="muted">현재 도메인: ${escapeHtml(window.location.origin)} · 키 길이: ${String(kakaoKey).length} · 오류: ${escapeHtml(error.message || "SDK load failed")}</p>
-          </div>
-        </div>
-      `;
+      const fallbackProperties = getInterestZoneProperties();
+      renderRasterMap(container, fallbackProperties, "OSM", "");
+      addTimeline(state.properties[0]?.id || "", "지도", `Kakao 로딩 실패로 OSM 지도를 표시했습니다: ${error.message || "SDK load failed"}`);
     });
 }
 
@@ -1250,6 +1237,11 @@ function getVisibleTiles(left, top, size, zoom) {
 
 function getVworldTileUrl(x, y, z, key) {
   return `https://api.vworld.kr/req/wmts/1.0.0/${encodeURIComponent(key)}/Base/${z}/${y}/${x}.png`;
+}
+
+function getOsmTileUrl(x, y, z) {
+  const server = ["a", "b", "c"][Math.abs(x + y) % 3];
+  return `https://${server}.tile.openstreetmap.org/${z}/${x}/${y}.png`;
 }
 
 function renderToday() {
