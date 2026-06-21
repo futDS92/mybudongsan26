@@ -634,14 +634,19 @@ function bindForms() {
       date: value("#visitDate"),
       score: Number(value("#visitScore")),
       note: value("#visitNote"),
+      photos: [],
     };
-    state.visits = [visit, ...state.visits];
-    addTimeline(visit.propertyId, "임장", "새 임장 기록이 저장되었습니다.");
-    createAlert(visit.propertyId, "field", "임장 정보 업데이트", visit.note);
-    saveState();
-    event.target.reset();
-    setToday();
-    render();
+    const files = [...(document.querySelector("#visitPhotos").files || [])];
+    readVisitPhotos(files).then((photos) => {
+      visit.photos = photos;
+      state.visits = [visit, ...state.visits];
+      addTimeline(visit.propertyId, "임장", photos.length ? `새 임장 기록과 사진 ${photos.length}장이 저장되었습니다.` : "새 임장 기록이 저장되었습니다.");
+      createAlert(visit.propertyId, "field", "임장 정보 업데이트", visit.note);
+      saveState();
+      event.target.reset();
+      setToday();
+      render();
+    });
   });
 
   document.querySelector("#sourceForm").addEventListener("submit", (event) => {
@@ -1309,17 +1314,52 @@ function renderVisits() {
   const list = document.querySelector("#visitList");
   list.innerHTML = state.visits.length ? state.visits.map((visit) => {
     const property = findProperty(visit.propertyId);
+    const photos = Array.isArray(visit.photos) ? visit.photos.filter(Boolean) : [];
     return `
       <div class="visit">
         <div>
           <strong>${escapeHtml(property?.name || "삭제된 자산")}</strong>
           <div class="muted">${escapeHtml(visit.date)} · 평점 ${visit.score}/5</div>
           <p>${escapeHtml(visit.note)}</p>
+          ${photos.length ? `
+            <div class="visit-photos">
+              ${photos.slice(0, 4).map((photo) => `
+                <img src="${escapeHtml(photo)}" alt="임장 사진" loading="lazy" />
+              `).join("")}
+            </div>
+          ` : ""}
         </div>
         <span class="badge">임장</span>
       </div>
     `;
   }).join("") : `<p>아직 저장된 임장 기록이 없습니다.</p>`;
+}
+
+function readVisitPhotos(files) {
+  return Promise.all(files.slice(0, 4).map((file) => resizeImageFile(file, 1280, 0.82))).then((items) => items.filter(Boolean));
+}
+
+function resizeImageFile(file, maxSize, quality) {
+  if (!file || !file.type?.startsWith("image/")) return Promise.resolve("");
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const image = new Image();
+      image.onload = () => {
+        const canvas = document.createElement("canvas");
+        const scale = Math.min(1, maxSize / Math.max(image.width, image.height));
+        canvas.width = Math.max(1, Math.round(image.width * scale));
+        canvas.height = Math.max(1, Math.round(image.height * scale));
+        const context = canvas.getContext("2d");
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      image.onerror = () => resolve("");
+      image.src = String(reader.result || "");
+    };
+    reader.onerror = () => resolve("");
+    reader.readAsDataURL(file);
+  });
 }
 
 function renderAlerts() {
@@ -1784,7 +1824,29 @@ function scoreMolitMatch(property, record) {
 
   if (apt === "현대" && !regionText.includes(record.umdName || "")) score -= 80;
   if (apt === "미도" && !regionText.includes(record.umdName || "")) score -= 80;
+  if (score > 0) return score;
+  return scoreMolitFallback(property, record);
+}
 
+function scoreMolitFallback(property, record) {
+  const region = String(property.region || "");
+  const umd = String(record.umdName || "");
+  const cityHints = ["성남", "수정구", "중원구", "단대동", "은행동"];
+  const matchesDistrict = cityHints.some((hint) => region.includes(hint) && umd.includes(hint));
+  const target = Number(property.baseArea || property.area || 0);
+  const recordArea = Number(record.area || 0);
+  const areaDiff = target && recordArea ? Math.abs(target - recordArea) : 999;
+
+  let score = 0;
+  if (matchesDistrict) score += 20;
+  if (record.sggCode === "41131" && region.includes("수정구")) score += 15;
+  if (record.sggCode === "41133" && region.includes("중원구")) score += 15;
+  if (areaDiff <= 1) score += 20;
+  else if (areaDiff <= 2) score += 16;
+  else if (areaDiff <= 3) score += 12;
+  else if (areaDiff <= 5) score += 8;
+  else if (areaDiff <= 8) score += 4;
+  if (normalizeText(record.aptName)) score += 2;
   return score;
 }
 

@@ -756,6 +756,21 @@ label {
   font-size: 14px;
 }
 
+.visit-photos {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.visit-photos img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+}
+
 .muted {
   color: var(--muted);
 }
@@ -1053,5 +1068,9 @@ html[data-device="mobile"] .nav-item {
 
   .source-row b {
     font-size: 12px;
+  }
+
+  .visit-photos {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
