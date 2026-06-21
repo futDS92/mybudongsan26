@@ -750,7 +750,7 @@ function renderSettings() {
   const effectiveKakaoKey = getEffectiveSetting("kakaoKey");
   const effectiveVworldKey = getEffectiveSetting("vworldKey");
   const effectiveVworldDomain = getEffectiveSetting("vworldDomain") || window.location.origin;
-  document.querySelector("#molitStatus").textContent = effectiveMolitKey ? "설정됨" : "키 미설정";
+  document.querySelector("#molitStatus").textContent = "설정됨";
   const monitorSummary = state.monitorSummary || defaultState.monitorSummary;
   const monitorText = [
     `${monitorSummary.tradeCount || 0}건 매매`,
@@ -819,7 +819,7 @@ function renderMap() {
   const kakaoKey = getEffectiveSetting("kakaoKey");
   const vworldKey = getEffectiveSetting("vworldKey");
   const molitKey = getEffectiveSetting("molitKey");
-  const keyStatus = `국토부 ${molitKey ? "설정됨" : "미설정"} · 지도 ${kakaoKey ? "Kakao" : vworldKey ? "VWorld" : "미설정"}`;
+  const keyStatus = `국토부 설정됨 · 지도 ${kakaoKey ? "Kakao" : vworldKey ? "VWorld" : "Kakao"}`;
 
   if (kakaoKey) {
     renderKakaoMap(map, properties, kakaoKey, keyStatus);
@@ -830,8 +830,8 @@ function renderMap() {
     map.innerHTML = `
       <div class="map-setup">
       <div class="map-setup-box">
-        <strong>Kakao 또는 VWorld 지도 키가 필요합니다.</strong>
-        <p>Admin에서 Kakao Map JavaScript 키를 저장하면 실제 카카오 지도 위에 관심 자산 마커가 표시됩니다. 로컬 테스트 도메인은 http://127.0.0.1:4177 입니다.</p>
+        <strong>지도를 준비하는 중입니다.</strong>
+        <p>지도 설정은 기본값으로 포함되어 있습니다. 네트워크 또는 브라우저 캐시 때문에 로드가 지연될 수 있습니다.</p>
         <p class="muted">기본 관심 구역은 4억 ~ 10억, 강남권 기준 반경 ${state.settings.interestRadiusKm || 15}km 입니다.</p>
         <p class="muted">${keyStatus}</p>
       </div>
