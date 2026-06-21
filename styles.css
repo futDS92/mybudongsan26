@@ -248,6 +248,7 @@ p {
 .map-canvas {
   position: relative;
   min-height: 458px;
+  height: clamp(320px, 52svh, 560px);
   overflow: hidden;
   background: #d7e2e7;
 }
@@ -988,11 +989,12 @@ html[data-device="mobile"] .nav-item {
   }
 
   .map-area {
-    min-height: 380px;
+    min-height: 420px;
   }
 
   .map-canvas {
-    min-height: 320px;
+    min-height: 340px;
+    height: 48svh;
   }
 
   .map-label {

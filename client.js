@@ -153,7 +153,7 @@ const defaultState = {
       fitScore: 0,
       subwayDistance: 0,
       tags: ["성남", "단대동", "관심단지"],
-      aliases: ["단대푸르지오", "성남 단대 푸르지오", "단대동 푸르지오"],
+      aliases: ["단대푸르지오", "성남 단대 푸르지오", "단대동 푸르지오", "성남단대푸르지오", "단대푸르지오아파트"],
       expectedDistricts: ["성남", "단대동", "수정구"],
       risk: "실거래와 임장 정보 입력 필요.",
       x: 52,
@@ -176,7 +176,7 @@ const defaultState = {
       fitScore: 0,
       subwayDistance: 0,
       tags: ["성남", "단대동", "관심단지"],
-      aliases: ["진로", "진로아파트 단대동", "성남 진로아파트", "단대동 진로"],
+      aliases: ["진로", "진로아파트 단대동", "성남 진로아파트", "단대동 진로", "성남단대동진로아파트", "단대동진로아파트"],
       expectedDistricts: ["성남", "단대동", "수정구"],
       risk: "실거래와 임장 정보 입력 필요.",
       x: 54,
@@ -199,7 +199,7 @@ const defaultState = {
       fitScore: 0,
       subwayDistance: 0,
       tags: ["성남", "관심단지"],
-      aliases: ["코오롱하늘채", "코오롱하늘채아파트 성남", "성남 코오롱하늘채"],
+      aliases: ["코오롱하늘채", "코오롱하늘채아파트 성남", "성남 코오롱하늘채", "성남코오롱하늘채", "성남코오롱하늘채아파트", "코오롱하늘채아파트"],
       expectedDistricts: ["성남", "중원구", "은행동"],
       risk: "실거래와 임장 정보 입력 필요.",
       x: 56,
@@ -222,7 +222,7 @@ const defaultState = {
       fitScore: 0,
       subwayDistance: 0,
       tags: ["성남", "단대동", "관심단지"],
-      aliases: ["미도", "한보미도", "성남 한보미도", "단대동 미도"],
+      aliases: ["미도", "한보미도", "성남 한보미도", "단대동 미도", "성남한보미도", "한보미도아파트"],
       expectedDistricts: ["성남", "단대동", "수정구"],
       risk: "실거래와 임장 정보 입력 필요.",
       x: 58,
@@ -245,7 +245,7 @@ const defaultState = {
       fitScore: 0,
       subwayDistance: 0,
       tags: ["성남", "은행동", "관심단지"],
-      aliases: ["현대", "현대아파트 은행동", "성남 은행동 현대아파트", "은행동 현대"],
+      aliases: ["현대", "현대아파트 은행동", "성남 은행동 현대아파트", "은행동 현대", "은행동현대", "은행동현대아파트", "성남은행동현대", "성남은행동현대아파트"],
       expectedDistricts: ["성남", "은행동", "중원구"],
       risk: "실거래와 임장 정보 입력 필요.",
       x: 60,
@@ -396,6 +396,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }, 150);
   window.addEventListener("resize", scheduleDeviceProfileUpdate);
   window.addEventListener("orientationchange", scheduleDeviceProfileUpdate);
+  window.visualViewport?.addEventListener("resize", scheduleDeviceProfileUpdate);
 });
 
 async function hydratePrivateConfig() {
@@ -869,8 +870,20 @@ function renderKakaoMap(container, properties, kakaoKey) {
         level: 9,
       });
       kakaoMap.addControl(new kakao.maps.ZoomControl(), kakao.maps.ControlPosition.RIGHT);
-      kakaoMap.relayout();
-      kakaoMap.setCenter(new kakao.maps.LatLng(mapState.centerLat, mapState.centerLng));
+      const relayout = () => {
+        if (!kakaoMap || !mapElement.isConnected) return;
+        kakaoMap.relayout();
+        kakaoMap.setCenter(new kakao.maps.LatLng(mapState.centerLat, mapState.centerLng));
+      };
+      relayout();
+      window.requestAnimationFrame(relayout);
+      window.setTimeout(relayout, 80);
+      window.setTimeout(relayout, 240);
+      if (window.ResizeObserver) {
+        const observer = new ResizeObserver(() => relayout());
+        observer.observe(mapElement);
+        mapElement.__resizeObserver = observer;
+      }
       renderKakaoMarkers(properties);
     })
     .catch((error) => {
