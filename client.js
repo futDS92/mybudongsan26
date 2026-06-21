@@ -53,10 +53,10 @@ const defaultState = {
     },
   ],
   settings: {
-    molitKey: "",
-    kakaoKey: "",
-    vworldKey: "",
-    vworldDomain: "",
+    molitKey: BUILT_IN_PRIVATE_CONFIG.molitKey,
+    kakaoKey: BUILT_IN_PRIVATE_CONFIG.kakaoKey,
+    vworldKey: BUILT_IN_PRIVATE_CONFIG.vworldKey,
+    vworldDomain: BUILT_IN_PRIVATE_CONFIG.vworldDomain,
     molitEndpoint: "https://apis.data.go.kr/1613000/RTMSDataSvcAptTradeDev/getRTMSDataSvcAptTradeDev",
     rentEndpoint: "https://apis.data.go.kr/1613000/RTMSDataSvcAptRent/getRTMSDataSvcAptRent",
     vworldEndpoint: "https://api.vworld.kr/req/data",
@@ -682,10 +682,10 @@ function bindForms() {
   document.querySelector("#sourceForm").addEventListener("submit", (event) => {
     event.preventDefault();
     state.settings = {
-      molitKey: value("#molitKey"),
-      kakaoKey: value("#kakaoKey"),
-      vworldKey: value("#vworldKey"),
-      vworldDomain: value("#vworldDomain"),
+      molitKey: value("#molitKey") || getEffectiveSetting("molitKey"),
+      kakaoKey: value("#kakaoKey") || getEffectiveSetting("kakaoKey"),
+      vworldKey: value("#vworldKey") || getEffectiveSetting("vworldKey"),
+      vworldDomain: value("#vworldDomain") || getEffectiveSetting("vworldDomain") || window.location.origin,
       molitEndpoint: state.settings.molitEndpoint || defaultState.settings.molitEndpoint,
       rentEndpoint: state.settings.rentEndpoint || defaultState.settings.rentEndpoint,
       vworldEndpoint: state.settings.vworldEndpoint || defaultState.settings.vworldEndpoint,
@@ -745,7 +745,11 @@ function renderSecurity() {
 }
 
 function renderSettings() {
-  const effectiveMolitKey = state.settings.molitKey || privateConfig.molitKey || "";
+  syncEffectiveSettings();
+  const effectiveMolitKey = getEffectiveSetting("molitKey");
+  const effectiveKakaoKey = getEffectiveSetting("kakaoKey");
+  const effectiveVworldKey = getEffectiveSetting("vworldKey");
+  const effectiveVworldDomain = getEffectiveSetting("vworldDomain") || window.location.origin;
   document.querySelector("#molitStatus").textContent = effectiveMolitKey ? "설정됨" : "키 미설정";
   const monitorSummary = state.monitorSummary || defaultState.monitorSummary;
   const monitorText = [
@@ -760,9 +764,9 @@ function renderSettings() {
   document.querySelector("#rentEndpoint").value = state.settings.rentEndpoint || defaultState.settings.rentEndpoint;
   document.querySelector("#vworldEndpoint").value = buildVworldBoundaryUrl({ includeKey: false });
   document.querySelector("#molitKey").value = effectiveMolitKey;
-  document.querySelector("#kakaoKey").value = state.settings.kakaoKey || "";
-  document.querySelector("#vworldKey").value = state.settings.vworldKey || "";
-  document.querySelector("#vworldDomain").value = state.settings.vworldDomain || "";
+  document.querySelector("#kakaoKey").value = effectiveKakaoKey;
+  document.querySelector("#vworldKey").value = effectiveVworldKey;
+  document.querySelector("#vworldDomain").value = effectiveVworldDomain;
   document.querySelector("#lawdCode").value = state.settings.lawdCode || "";
   document.querySelector("#dealMonth").value = state.settings.dealMonth || "";
   document.querySelector("#interestPriceMin").value = state.settings.interestPriceMin || 40000;
@@ -771,6 +775,17 @@ function renderSettings() {
   document.querySelector("#newsKeywords").value = state.settings.newsKeywords;
   document.querySelector("#newsEndpoint").value = state.settings.newsEndpoint || "/api/news";
   document.querySelector("#alertThreshold").value = state.settings.alertThreshold;
+}
+
+function getEffectiveSetting(key) {
+  return state.settings?.[key] || privateConfig?.[key] || BUILT_IN_PRIVATE_CONFIG[key] || "";
+}
+
+function syncEffectiveSettings() {
+  state.settings.molitKey = getEffectiveSetting("molitKey");
+  state.settings.kakaoKey = getEffectiveSetting("kakaoKey");
+  state.settings.vworldKey = getEffectiveSetting("vworldKey");
+  state.settings.vworldDomain = getEffectiveSetting("vworldDomain") || window.location.origin;
 }
 
 function renderMetrics() {
@@ -795,14 +810,15 @@ function renderRegionFilter() {
 }
 
 function renderMap() {
+  syncEffectiveSettings();
   const selected = document.querySelector("#regionFilter").value || "전체";
   const map = document.querySelector("#mapCanvas");
   const properties = getInterestZoneProperties().filter((property) => (
     selected === "전체" ? true : property.region.startsWith(selected)
   ));
-  const kakaoKey = state.settings.kakaoKey || privateConfig.kakaoKey || "";
-  const vworldKey = state.settings.vworldKey || privateConfig.vworldKey || "";
-  const molitKey = state.settings.molitKey || privateConfig.molitKey || "";
+  const kakaoKey = getEffectiveSetting("kakaoKey");
+  const vworldKey = getEffectiveSetting("vworldKey");
+  const molitKey = getEffectiveSetting("molitKey");
   const keyStatus = `국토부 ${molitKey ? "설정됨" : "미설정"} · 지도 ${kakaoKey ? "Kakao" : vworldKey ? "VWorld" : "미설정"}`;
 
   if (kakaoKey) {
