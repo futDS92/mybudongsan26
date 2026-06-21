@@ -397,6 +397,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   window.addEventListener("resize", scheduleDeviceProfileUpdate);
   window.addEventListener("orientationchange", scheduleDeviceProfileUpdate);
   window.visualViewport?.addEventListener("resize", scheduleDeviceProfileUpdate);
+  window.addEventListener("pageshow", () => {
+    if (document.querySelector("#dashboardView")?.classList.contains("active")) {
+      window.requestAnimationFrame(() => renderMap());
+    }
+  });
 });
 
 async function hydratePrivateConfig() {
@@ -589,6 +594,9 @@ function setView(view) {
   });
   document.querySelector("#viewTitle").textContent = views[view].title;
   document.querySelector("#viewSubtitle").textContent = views[view].subtitle;
+  if (view === "dashboard") {
+    window.requestAnimationFrame(() => renderMap());
+  }
 }
 
 function bindForms() {
