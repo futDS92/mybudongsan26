@@ -20,6 +20,18 @@
   ],
   "routes": [
     {
+      "src": "/client\\.js",
+      "dest": "/client.js"
+    },
+    {
+      "src": "/styles\\.css",
+      "dest": "/styles.css"
+    },
+    {
+      "src": "/private-config\\.js",
+      "dest": "/private-config.js"
+    },
+    {
       "src": "/api/(.*)",
       "dest": "/api/$1.js"
     },
