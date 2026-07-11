@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "generatedAt": "2026-07-11T06:51:23.726Z",
+  "datasets": [
+    {
+      "id": "gb_r001",
+      "name": "서울특별시 청년 1인 가구를 위한 주택 입지 선정",
+      "region": "서울특별시 일부",
+      "type": "polygon-metric",
+      "crs": "EPSG:4326",
+      "bbox": [
+        126.9184011,
+        37.5609572,
+        126.9435118,
+        37.5841437
+      ],
+      "count": 4415,
+      "path": "/data/location-score/gb_r001.json",
+      "schema": {
+        "totalScore": {
+          "source": "TOT_SCR",
+          "label": "종합 입지 점수"
+        },
+        "subwayDistance": {
+          "source": "SBW_DST",
+          "label": "지하철역 거리",
+          "unit": "m"
+        },
+        "usageScore": {
+          "source": "USG_SCR",
+          "label": "용도 점수"
+        },
+        "policeDistance": {
+          "source": "PLD_DST",
+          "label": "경찰시설 거리",
+          "unit": "m"
+        },
+        "universityDistance": {
+          "source": "UNV_DST",
+          "label": "대학 거리",
+          "unit": "m"
+        },
+        "policeScore": {
+          "source": "PLC_SCR",
+          "label": "치안 점수"
+        },
+        "universityScore": {
+          "source": "UNV_SCR",
+          "label": "대학 접근 점수"
+        }
+      }
+    }
+  ]
+}

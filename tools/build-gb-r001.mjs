@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 
 const sourceDir = process.argv[2] || "/tmp/gb_r001";
-const outputPath = process.argv[3] || "data/gb_r001.json";
+const outputPath = process.argv[3] || "data/location-score/gb_r001.json";
 
 const files = await readdirLike(sourceDir);
 const shpPath = files.find((file) => extname(file).toLowerCase() === ".shp");
@@ -20,23 +20,35 @@ const features = shapes.map((shape, index) => {
     bbox: roundList(shape.bbox),
     rings: shape.rings.map((ring) => ring.map((point) => roundList(point))),
     centroid: roundList(shape.centroid),
-    score: toNumber(record.TOT_SCR),
-    subwayDistance: toNumber(record.SBW_DST),
-    usageScore: toNumber(record.USG_SCR),
-    policeDistance: toNumber(record.PLD_DST),
-    universityDistance: toNumber(record.UNV_DST),
-    policeScore: toNumber(record.PLC_SCR),
-    universityScore: toNumber(record.UNV_SCR),
+    metrics: {
+      totalScore: toNumber(record.TOT_SCR),
+      subwayDistance: toNumber(record.SBW_DST),
+      usageScore: toNumber(record.USG_SCR),
+      policeDistance: toNumber(record.PLD_DST),
+      universityDistance: toNumber(record.UNV_DST),
+      policeScore: toNumber(record.PLC_SCR),
+      universityScore: toNumber(record.UNV_SCR),
+    },
   };
-}).filter((feature) => Number.isFinite(feature.score));
+}).filter((feature) => Number.isFinite(feature.metrics.totalScore));
 
 const payload = {
   id: "gb_r001",
   name: "서울특별시 청년 1인 가구를 위한 주택 입지 선정",
+  region: "서울특별시 일부",
+  type: "polygon-metric",
   crs: "EPSG:4326",
   generatedAt: new Date().toISOString(),
   sourceFile: basename(shpPath),
-  fields: ["TOT_SCR", "SBW_DST", "USG_SCR", "PLD_DST", "UNV_DST", "PLC_SCR", "UNV_SCR"],
+  schema: {
+    totalScore: { source: "TOT_SCR", label: "종합 입지 점수" },
+    subwayDistance: { source: "SBW_DST", label: "지하철역 거리", unit: "m" },
+    usageScore: { source: "USG_SCR", label: "용도 점수" },
+    policeDistance: { source: "PLD_DST", label: "경찰시설 거리", unit: "m" },
+    universityDistance: { source: "UNV_DST", label: "대학 거리", unit: "m" },
+    policeScore: { source: "PLC_SCR", label: "치안 점수" },
+    universityScore: { source: "UNV_SCR", label: "대학 접근 점수" },
+  },
   bbox: combineBbox(features.map((feature) => feature.bbox)),
   count: features.length,
   features,
@@ -44,7 +56,28 @@ const payload = {
 
 await mkdir(dirname(outputPath), { recursive: true });
 await writeFile(outputPath, `${JSON.stringify(payload)}\n`);
+await writeRegistry(outputPath, payload);
 console.log(`Wrote ${features.length} gb_r001 features to ${outputPath}`);
+
+async function writeRegistry(outputPath, dataset) {
+  const registryPath = outputPath.replace(/\/[^/]+$/, "/index.json");
+  const registry = {
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    datasets: [{
+      id: dataset.id,
+      name: dataset.name,
+      region: dataset.region,
+      type: dataset.type,
+      crs: dataset.crs,
+      bbox: dataset.bbox,
+      count: dataset.count,
+      path: `/${outputPath}`,
+      schema: dataset.schema,
+    }],
+  };
+  await writeFile(registryPath, `${JSON.stringify(registry, null, 2)}\n`);
+}
 
 async function readdirLike(dir) {
   const { readdir } = await import("node:fs/promises");

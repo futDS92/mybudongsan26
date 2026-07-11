@@ -343,8 +343,8 @@ let detailPropertyId = null;
 let detailSelectedArea = null;
 let newsRequestSeq = 0;
 let deviceResizeTimer = null;
-let gbR001DatasetPromise = null;
-let gbR001Dataset = null;
+let locationScoreDatasetsPromise = null;
+let locationScoreDatasets = null;
 const deviceState = {
   profile: "",
 };
@@ -640,7 +640,7 @@ function bindForms() {
       x: existing?.x || 28 + Math.random() * 48,
       y: existing?.y || 28 + Math.random() * 42,
     };
-    await applyGbR001Score(property, {
+    await applyLocationScore(property, {
       preserveFitScore: Boolean(fitScoreText),
       preserveSubwayDistance: Boolean(subwayText),
     });
@@ -1183,7 +1183,7 @@ function addMapSearchResult() {
       x: existing?.x || 50,
       y: existing?.y || 50,
     };
-    await applyGbR001Score(property);
+    await applyLocationScore(property);
 
     state.properties = existing
       ? state.properties.map((item) => (item.id === existing.id ? property : item))
@@ -1290,7 +1290,7 @@ function renderToday() {
   const sourceItem = dataset ? `
     <div class="today-item">
       <div>
-        <strong>gb_r001 입지 데이터 반영</strong>
+        <strong>입지 점수 데이터 반영</strong>
         <div class="muted">${escapeHtml(dataset.name)} · ${dataset.records.toLocaleString()}개 폴리곤 · 평균 ${dataset.totalScoreAverage}, 최고 ${dataset.totalScoreMax}</div>
       </div>
       <span class="badge">입지</span>
@@ -1739,19 +1739,19 @@ async function enrichLocationSignals() {
       }
     }
     if (!property.fitScore) {
-      const score = await getGbR001Score(property);
+      const score = await getLocationScore(property);
       if (score?.score) {
         property.fitScore = score.score;
         property.fitScoreSource = score.source;
         if (score.subwayDistance && !property.subwayDistance) property.subwayDistance = score.subwayDistance;
-        property.gbR001 = score;
+        property.locationScore = score;
         changed = true;
       } else if (!property.fitScoreSource) {
         property.fitScoreSource = score?.source || "unsupported";
         changed = true;
       }
     } else if (!property.fitScoreSource) {
-      property.fitScoreSource = (await getGbR001Score(property))?.source || "unsupported";
+      property.fitScoreSource = (await getLocationScore(property))?.source || "unsupported";
       changed = true;
     }
   }));
@@ -1773,8 +1773,8 @@ function findNearestSubway(property) {
   });
 }
 
-async function applyGbR001Score(property, options = {}) {
-  const score = await getGbR001Score(property);
+async function applyLocationScore(property, options = {}) {
+  const score = await getLocationScore(property);
   if (!score?.score) {
     property.fitScoreSource = score?.source || "unsupported";
     return false;
@@ -1782,50 +1782,69 @@ async function applyGbR001Score(property, options = {}) {
   if (!options.preserveFitScore) property.fitScore = score.score;
   if (!options.preserveSubwayDistance && score.subwayDistance) property.subwayDistance = score.subwayDistance;
   property.fitScoreSource = score.source;
-  property.gbR001 = score;
+  property.locationScore = score;
+  if (score.datasetId === "gb_r001") property.gbR001 = score;
   return true;
 }
 
-async function getGbR001Score(property) {
+async function getLocationScore(property) {
   if (!property?.lat || !property?.lng) return { score: 0, source: "missing-coordinate" };
-  const dataset = await loadGbR001Dataset();
-  if (!dataset?.features?.length) return { score: 0, source: "gb_r001-unavailable" };
-  const [minLng, minLat, maxLng, maxLat] = dataset.bbox || [];
-  if (!pointInBbox(property.lng, property.lat, [minLng, minLat, maxLng, maxLat])) {
-    return { score: 0, source: "unsupported" };
-  }
+  const datasets = await loadLocationScoreDatasets();
+  if (!datasets.length) return { score: 0, source: "location-score-unavailable" };
 
+  for (const dataset of datasets) {
+    const [minLng, minLat, maxLng, maxLat] = dataset.bbox || [];
+    if (!pointInBbox(property.lng, property.lat, [minLng, minLat, maxLng, maxLat])) continue;
+    const score = scoreFromLocationDataset(property, dataset);
+    if (score?.score) return score;
+  }
+  return { score: 0, source: "unsupported" };
+}
+
+function scoreFromLocationDataset(property, dataset) {
   const candidates = dataset.features.filter((feature) => pointInBbox(property.lng, property.lat, feature.bbox));
   const matched = candidates.find((feature) => feature.rings?.some((ring) => pointInRing(property.lng, property.lat, ring)));
   const feature = matched || nearestFeature(property.lng, property.lat, candidates);
-  if (!feature) return { score: 0, source: "unsupported" };
-
+  if (!feature) return null;
+  const metrics = feature.metrics || {};
   return {
-    source: matched ? "gb_r001" : "gb_r001-nearest",
+    source: matched ? `${dataset.id}:polygon` : `${dataset.id}:nearest`,
     datasetId: dataset.id,
     datasetName: dataset.name,
-    score: Number(feature.score || 0),
-    subwayDistance: Number(feature.subwayDistance || 0),
-    usageScore: Number(feature.usageScore || 0),
-    policeDistance: Number(feature.policeDistance || 0),
-    universityDistance: Number(feature.universityDistance || 0),
-    policeScore: Number(feature.policeScore || 0),
-    universityScore: Number(feature.universityScore || 0),
+    region: dataset.region || "",
+    score: Number(metrics.totalScore || 0),
+    subwayDistance: Number(metrics.subwayDistance || 0),
+    usageScore: Number(metrics.usageScore || 0),
+    policeDistance: Number(metrics.policeDistance || 0),
+    universityDistance: Number(metrics.universityDistance || 0),
+    policeScore: Number(metrics.policeScore || 0),
+    universityScore: Number(metrics.universityScore || 0),
   };
 }
 
-async function loadGbR001Dataset() {
-  if (gbR001Dataset) return gbR001Dataset;
-  if (!gbR001DatasetPromise) {
-    gbR001DatasetPromise = fetch("/data/gb_r001.json", { headers: { Accept: "application/json" } })
+async function loadLocationScoreDatasets() {
+  if (locationScoreDatasets) return locationScoreDatasets;
+  if (!locationScoreDatasetsPromise) {
+    locationScoreDatasetsPromise = fetch("/data/location-score/index.json", { headers: { Accept: "application/json" } })
       .then((response) => (response.ok ? response.json() : null))
-      .then((payload) => {
-        gbR001Dataset = payload;
-        return payload;
+      .then(async (registry) => {
+        const entries = registry?.datasets || [];
+        const loaded = await Promise.all(entries.map(async (entry) => {
+          try {
+            const response = await fetch(entry.path, { headers: { Accept: "application/json" } });
+            if (!response.ok) return null;
+            const dataset = await response.json();
+            return { ...entry, ...dataset };
+          } catch {
+            return null;
+          }
+        }));
+        locationScoreDatasets = loaded.filter(Boolean);
+        return locationScoreDatasets;
       })
-      .catch(() => null);
+      .catch(() => []);
   }
-  return gbR001DatasetPromise;
+  return locationScoreDatasetsPromise;
 }
 
 function pointInBbox(lng, lat, bbox) {
