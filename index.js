@@ -23,7 +23,7 @@ export default async function handler(req, res) {
     return;
   }
 
-  const pathname = url.pathname === "/" ? "/index.html" : url.pathname;
+  const pathname = url.pathname === "/" ? "/index.html" : url.pathname === "/app" ? "/app.html" : url.pathname;
   const safePath = normalize(pathname).replace(/^(\.\.[/\\])+/, "");
   const filePath = join(root, safePath);
   const ext = extname(filePath);

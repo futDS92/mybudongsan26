@@ -1,7 +1,7 @@
 import { copyFile, mkdir, rm } from "node:fs/promises";
 
 const outputDir = new URL("./public/", import.meta.url);
-const files = ["index.html", "styles.css", "client.js", "config.js"];
+const files = ["index.html", "app.html", "styles.css", "client.js", "config.js"];
 const dataFiles = ["location-score/index.json", "location-score/gb_r001.json"];
 
 await rm(outputDir, { recursive: true, force: true });
