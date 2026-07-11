@@ -950,10 +950,12 @@ async function renderKakaoMarkers(properties) {
   kakaoMarkers = [];
 
   const resolved = await Promise.all(properties.map((property) => resolvePropertyCoordinate(property)));
+  const resolvedProperties = resolved
+    .map((item) => item?.property)
+    .filter((property) => property?.lat && property?.lng);
   let changed = false;
 
-  resolved.forEach((property) => {
-    if (!property?.lat || !property?.lng) return;
+  resolvedProperties.forEach((property) => {
     const position = new kakao.maps.LatLng(property.lat, property.lng);
     const marker = new kakao.maps.Marker({ map: kakaoMap, position, title: property.name });
     const overlay = new kakao.maps.CustomOverlay({
@@ -971,7 +973,7 @@ async function renderKakaoMarkers(properties) {
     kakaoMarkers.push(marker, overlay);
   });
 
-  fitKakaoMapToProperties(resolved.filter((property) => property?.lat && property?.lng));
+  fitKakaoMapToProperties(resolvedProperties);
 
   setTimeout(() => {
     document.querySelectorAll(".kakao-label[data-edit]").forEach((label) => {
