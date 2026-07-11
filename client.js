@@ -165,6 +165,9 @@ const defaultState = {
       aliases: ["단대푸르지오", "성남 단대 푸르지오", "단대동 푸르지오", "성남단대푸르지오", "단대푸르지오아파트"],
       expectedDistricts: ["성남", "단대동", "수정구"],
       risk: "실거래와 임장 정보 입력 필요.",
+      lat: 37.45087954363311,
+      lng: 127.15808636824087,
+      coordsSource: "vworld",
       x: 52,
       y: 52,
     },
@@ -188,6 +191,9 @@ const defaultState = {
       aliases: ["진로", "진로아파트 단대동", "성남 진로아파트", "단대동 진로", "성남단대동진로아파트", "단대동진로아파트"],
       expectedDistricts: ["성남", "단대동", "수정구"],
       risk: "실거래와 임장 정보 입력 필요.",
+      lat: 37.45095971355684,
+      lng: 127.15594337792555,
+      coordsSource: "vworld",
       x: 54,
       y: 54,
     },
@@ -211,6 +217,9 @@ const defaultState = {
       aliases: ["코오롱하늘채", "코오롱하늘채아파트 성남", "성남 코오롱하늘채", "성남코오롱하늘채", "성남코오롱하늘채아파트", "코오롱하늘채아파트"],
       expectedDistricts: ["성남", "수정구", "단대동"],
       risk: "실거래와 임장 정보 입력 필요.",
+      lat: 37.452337442310295,
+      lng: 127.15733838124366,
+      coordsSource: "vworld",
       x: 56,
       y: 52,
     },
@@ -234,6 +243,9 @@ const defaultState = {
       aliases: ["미도", "한보미도", "성남 한보미도", "단대동 미도", "성남한보미도", "한보미도아파트"],
       expectedDistricts: ["성남", "단대동", "수정구"],
       risk: "실거래와 임장 정보 입력 필요.",
+      lat: 37.447066621224074,
+      lng: 127.15581904339015,
+      coordsSource: "vworld",
       x: 58,
       y: 54,
     },
@@ -257,6 +269,9 @@ const defaultState = {
       aliases: ["현대", "현대아파트 은행동", "성남 은행동 현대아파트", "은행동 현대", "은행동현대", "은행동현대아파트", "성남은행동현대", "성남은행동현대아파트"],
       expectedDistricts: ["성남", "은행동", "중원구"],
       risk: "실거래와 임장 정보 입력 필요.",
+      lat: 37.45193141722581,
+      lng: 127.1635766269807,
+      coordsSource: "vworld",
       x: 60,
       y: 56,
     },
@@ -484,13 +499,20 @@ function hydrateProperties(properties) {
     const fallback = fallbackCoordinate(index);
     const hasStoredCoordinate = Boolean(property.lat && property.lng);
     const isDefaultTracked = Boolean(defaultMatch?.tags?.includes("관심단지"));
+    const shouldUseDefaultCoordinate = Boolean(
+      isDefaultTracked
+      && defaultMatch?.lat
+      && defaultMatch?.lng
+      && property.coordsSource !== "manual"
+      && property.coordsSource !== "kakao"
+    );
     return {
       ...defaultMatch,
       ...property,
       region: isDefaultTracked && property.coordsSource !== "manual" ? defaultMatch.region : property.region,
-      lat: property.lat || defaultMatch?.lat || fallback.lat,
-      lng: property.lng || defaultMatch?.lng || fallback.lng,
-      coordsSource: property.coordsSource || defaultMatch?.coordsSource || (hasStoredCoordinate ? "stored" : "fallback"),
+      lat: shouldUseDefaultCoordinate ? defaultMatch.lat : property.lat || defaultMatch?.lat || fallback.lat,
+      lng: shouldUseDefaultCoordinate ? defaultMatch.lng : property.lng || defaultMatch?.lng || fallback.lng,
+      coordsSource: shouldUseDefaultCoordinate ? defaultMatch.coordsSource : property.coordsSource || defaultMatch?.coordsSource || (hasStoredCoordinate ? "stored" : "fallback"),
       fitScoreSource: property.fitScoreSource || defaultMatch?.fitScoreSource || "",
       aliases: isDefaultTracked ? defaultMatch.aliases || [] : property.aliases || defaultMatch?.aliases || [],
       expectedDistricts: isDefaultTracked ? defaultMatch.expectedDistricts || [] : property.expectedDistricts || defaultMatch?.expectedDistricts || [],
@@ -788,6 +810,7 @@ function renderMap() {
   const properties = getInterestZoneProperties().filter((property) => (
     selected === "전체" ? true : property.region.startsWith(selected)
   ));
+  recenterMapToProperties(properties);
   const kakaoKey = getEffectiveSetting("kakaoKey");
   const vworldKey = getEffectiveSetting("vworldKey");
   const molitKey = getEffectiveSetting("molitKey");
@@ -948,6 +971,8 @@ async function renderKakaoMarkers(properties) {
     kakaoMarkers.push(marker, overlay);
   });
 
+  fitKakaoMapToProperties(resolved.filter((property) => property?.lat && property?.lng));
+
   setTimeout(() => {
     document.querySelectorAll(".kakao-label[data-edit]").forEach((label) => {
       label.addEventListener("click", () => editProperty(label.dataset.edit));
@@ -959,6 +984,26 @@ async function renderKakaoMarkers(properties) {
   if (changed || derivedChanged) {
     render({ skipMap: true });
   }
+}
+
+function recenterMapToProperties(properties) {
+  const center = getPropertiesCenter(properties);
+  if (!center?.lat || !center?.lng) return;
+  mapState.centerLat = center.lat;
+  mapState.centerLng = center.lng;
+}
+
+function fitKakaoMapToProperties(properties) {
+  if (!kakaoMap || !window.kakao?.maps || !properties.length) return;
+  if (properties.length === 1) {
+    kakaoMap.setCenter(new kakao.maps.LatLng(properties[0].lat, properties[0].lng));
+    return;
+  }
+  const bounds = new kakao.maps.LatLngBounds();
+  properties.forEach((property) => {
+    bounds.extend(new kakao.maps.LatLng(property.lat, property.lng));
+  });
+  kakaoMap.setBounds(bounds, 36, 36, 36, 36);
 }
 
 function resolvePropertyCoordinate(property) {
