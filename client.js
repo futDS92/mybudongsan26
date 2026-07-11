@@ -1099,11 +1099,17 @@ function getInterestZoneProperties() {
   const radiusKm = Number(state.settings.interestRadiusKm || 15);
 
   return state.properties.filter((property) => {
+    if (isExplicitWatchProperty(property)) return true;
     const price = Number(property.price || 0);
     const withinPrice = !price || (price >= minPrice && price <= maxPrice);
     const withinArea = isNearGangnam(property, radiusKm);
     return withinPrice && withinArea;
   });
+}
+
+function isExplicitWatchProperty(property) {
+  const tags = property.tags || [];
+  return tags.includes("관심단지") || tags.includes("검색추가");
 }
 
 function isNearGangnam(property, radiusKm) {
