@@ -1326,6 +1326,7 @@ function renderNews() {
   const news = state.news
     .filter((item) => {
       const property = findProperty(item.propertyId);
+      if (item.propertyId && !property) return false;
       const haystack = [item.keyword, item.title, item.summary, property?.name, property?.region].join(" ");
       return keywords.some((keyword) => haystack.includes(keyword));
     })
@@ -1351,12 +1352,21 @@ function getNewsKeywords() {
     .split(",")
     .map((keyword) => keyword.trim())
     .filter(Boolean);
+  const activePropertyText = state.properties.map((property) => [
+    property.name,
+    property.region,
+    ...(property.tags || []),
+  ].join(" ")).join(" ");
+  const connectedConfigured = configured.filter((keyword) => (
+    activePropertyText.includes(keyword)
+    || state.properties.some((property) => property.region.includes(keyword) || property.name.includes(keyword))
+  ));
   const propertyKeywords = state.properties.flatMap((property) => [
     property.name,
     property.region.split(" ").slice(-1)[0],
     ...property.tags,
   ]);
-  return [...new Set([...configured, ...propertyKeywords].filter(Boolean))];
+  return [...new Set([...connectedConfigured, ...propertyKeywords].filter(Boolean))];
 }
 
 function renderProperties() {
@@ -1628,6 +1638,10 @@ function deleteProperty(id) {
   state.properties = state.properties.filter((property) => property.id !== id);
   state.visits = state.visits.filter((visit) => visit.propertyId !== id);
   state.alerts = state.alerts.filter((alert) => alert.propertyId !== id);
+  state.news = state.news.filter((item) => item.propertyId !== id);
+  state.timeline = state.timeline.filter((item) => item.propertyId !== id);
+  delete state.propertyTradeHistory?.[id];
+  delete state.propertyRentHistory?.[id];
   saveState();
   render();
 }
@@ -1668,9 +1682,9 @@ async function runMonitor() {
   const fetchedNews = await collectNewsItems();
   if (requestId !== newsRequestSeq) return;
   if (fetchedNews.length) {
-    state.news = mergeNewsItems(fetchedNews, state.news.filter((item) => !isSampleNews(item))).slice(0, 30);
+    state.news = filterActiveNews(mergeNewsItems(fetchedNews, state.news.filter((item) => !isSampleNews(item)))).slice(0, 30);
   } else if (first) {
-    state.news = state.news.filter((item) => !isSampleNews(item)).slice(0, 30);
+    state.news = filterActiveNews(state.news.filter((item) => !isSampleNews(item))).slice(0, 30);
   }
   if (first) {
     const latest = fetchedNews[0] || state.news[0];
@@ -2156,7 +2170,7 @@ function inferPropertyId(item, keyword) {
     const tokens = [property.name, property.region, ...(property.tags || [])].filter(Boolean);
     return tokens.some((token) => haystack.includes(token));
   });
-  return matched?.id || state.properties[0]?.id || "";
+  return matched?.id || "";
 }
 
 function mergeNewsItems(freshItems, existingItems) {
@@ -2174,6 +2188,16 @@ function mergeNewsItems(freshItems, existingItems) {
     if (!byKey.has(key)) byKey.set(key, normalized);
   });
   return [...byKey.values()].sort((a, b) => String(b.at).localeCompare(String(a.at)));
+}
+
+function filterActiveNews(items) {
+  const keywords = getNewsKeywords();
+  return items.filter((item) => {
+    if (item.propertyId && !findProperty(item.propertyId)) return false;
+    const property = findProperty(item.propertyId);
+    const haystack = [item.keyword, item.title, item.summary, property?.name, property?.region].join(" ");
+    return keywords.some((keyword) => haystack.includes(keyword));
+  });
 }
 
 function isSampleNews(item) {
