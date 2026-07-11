@@ -1,0 +1,4 @@
+interface:
+  display_name: "IAMNOTAI"
+  short_description: "Polish Korean drafts for docs and release notes."
+  default_prompt: "Use this skill to refine Korean drafts, UI copy, release notes, and docs while preserving meaning and making the wording sound natural."

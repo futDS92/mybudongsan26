@@ -3,6 +3,8 @@ import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
+const DEFAULT_SUPABASE_RECOVERY_URL = "https://pyvnpynvvkyrkrtpeyzt.supabase.co/functions/v1/admin-recovery";
+const DEFAULT_RECOVERY_SHARED_SECRET = "c4d8f1a7e92b4c3d8f0e6a1b5c7d9e2f1a3c5d7b9e0f2a4c6d8e1f3a5b7c9d0";
 const contentTypes = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -14,6 +16,10 @@ const newsCache = new Map();
 
 export default async function handler(req, res) {
   const url = new URL(req.url, "https://mybudongsan26.vercel.app");
+  if (url.pathname === "/api/admin/recovery") {
+    await handleRecovery(req, res);
+    return;
+  }
   if (url.pathname.startsWith("/api/molit/")) {
     await handleMolit(url, res);
     return;
@@ -23,7 +29,12 @@ export default async function handler(req, res) {
     return;
   }
 
-  const pathname = url.pathname === "/" ? "/index.html" : url.pathname === "/app" ? "/app.html" : url.pathname;
+  const isTossMode = url.pathname === "/toss" || url.pathname === "/miniapp";
+  const pathname = url.pathname === "/" && isTossMode
+    ? "/app.html"
+    : url.pathname === "/" ? "/index.html"
+    : url.pathname === "/app" || isTossMode ? "/app.html"
+    : url.pathname;
   const safePath = normalize(pathname).replace(/^(\.\.[/\\])+/, "");
   const filePath = join(root, safePath);
   const ext = extname(filePath);
@@ -47,6 +58,110 @@ export default async function handler(req, res) {
     res.setHeader("Content-Type", contentTypes[".html"]);
     res.setHeader("Cache-Control", "no-store");
     res.end(fallback);
+  }
+}
+
+async function handleRecovery(req, res) {
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: "Method not allowed" });
+    return;
+  }
+
+  const payload = await readJsonBody(req);
+  const recoveryName = String(payload.recoveryName || "").trim();
+  const recoveryEmail = String(payload.recoveryEmail || "").trim();
+  const tempPasscode = String(payload.tempPasscode || "").trim();
+  const expiresAt = Number(payload.expiresAt || 0);
+  const origin = String(payload.origin || "https://mybudongsan26.vercel.app").trim();
+
+  if (!recoveryName || !recoveryEmail || !tempPasscode || !expiresAt) {
+    sendJson(res, 400, { sent: false, error: "Missing recovery payload" });
+    return;
+  }
+
+  const supabaseRecoveryUrl = String(process.env.SUPABASE_RECOVERY_URL || process.env.SUPABASE_ADMIN_RECOVERY_URL || DEFAULT_SUPABASE_RECOVERY_URL).trim();
+  const recoverySecret = String(process.env.RECOVERY_SHARED_SECRET || DEFAULT_RECOVERY_SHARED_SECRET).trim();
+  if (supabaseRecoveryUrl) {
+    const forwarded = await forwardRecoveryRequest({
+      url: supabaseRecoveryUrl,
+      secret: recoverySecret,
+      payload: { recoveryName, recoveryEmail, tempPasscode, expiresAt, origin },
+    });
+    if (forwarded.ok) {
+      sendJson(res, 200, { sent: true, provider: "supabase" });
+      return;
+    }
+    sendJson(res, forwarded.status || 502, {
+      sent: false,
+      provider: "supabase",
+      error: forwarded.data?.error || forwarded.error || "Recovery email forward failed",
+    });
+    return;
+  }
+
+  const apiKey = String(process.env.RESEND_API_KEY || "").trim();
+  const from = String(process.env.RECOVERY_FROM_EMAIL || "").trim();
+  if (!apiKey || !from) {
+    sendJson(res, 501, { sent: false, error: "Recovery email service is not configured" });
+    return;
+  }
+
+  const subject = "부동산 모니터 임시 비밀번호";
+  const text = [
+    `${recoveryName}님, 관리자 임시 비밀번호를 발급했습니다.`,
+    "",
+    `임시 비밀번호: ${tempPasscode}`,
+    `만료 시각: ${new Date(expiresAt).toLocaleString("ko-KR")}`,
+    "",
+    "로그인 화면의 'Admin 패스코드 또는 임시 비밀번호' 칸에 위 값을 입력한 뒤 새 비밀번호를 설정하세요.",
+    `도메인: ${origin}`,
+  ].join("\n");
+
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from,
+      to: [recoveryEmail],
+      subject,
+      text,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    sendJson(res, 502, { sent: false, error: errorText || `Resend ${response.status}` });
+    return;
+  }
+
+  sendJson(res, 200, { sent: true });
+}
+
+async function forwardRecoveryRequest({ url, secret, payload }) {
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...(secret ? { "x-recovery-secret": secret } : {}),
+      },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json().catch(() => ({}));
+    return {
+      ok: response.ok && Boolean(data?.sent),
+      status: response.status,
+      data,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error?.message || String(error),
+    };
   }
 }
 
@@ -85,6 +200,9 @@ async function handleMolit(url, res) {
     headers: {
       "User-Agent": "Mozilla/5.0 real-estate-monitor/1.0",
       "Accept": "application/xml,text/xml,*/*",
+      "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+      "Origin": "https://www.data.go.kr",
+      "Referer": "https://www.data.go.kr/",
     },
   });
   const xml = await response.text();
@@ -147,6 +265,14 @@ function sendJson(res, statusCode, payload, headers = {}) {
   res.setHeader("Cache-Control", "no-store");
   Object.entries(headers).forEach(([key, value]) => res.setHeader(key, value));
   res.end(JSON.stringify(payload));
+}
+
+async function readJsonBody(req) {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  const raw = Buffer.concat(chunks).toString("utf8").trim();
+  if (!raw) return {};
+  return JSON.parse(raw);
 }
 
 function onlyDigits(value) {

@@ -1,0 +1,4 @@
+project_id = "pyvnpynvvkyrkrtpeyzt"
+
+[functions.admin-recovery]
+verify_jwt = false

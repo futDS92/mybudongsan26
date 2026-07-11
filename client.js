@@ -1,4 +1,17 @@
 const STORAGE_KEY = "realEstateMonitor:v1";
+const DEFAULT_ADMIN_PASSCODE = "jeongmin";
+const DEFAULT_ADMIN_PASSCODE_SALT = "real-estate-monitor-default";
+const DEFAULT_ADMIN_PASSCODE_HASH = "6b57bcdfa656ac8f8ea31de5cd889b3cb365d1d52a4e3e74aef5523546f9381e";
+const DEFAULT_RECOVERY_NAME = "";
+const DEFAULT_RECOVERY_EMAIL = "";
+const DEFAULT_TEMP_PASSCODE_HASH = "";
+const DEFAULT_TEMP_PASSCODE_SALT = "";
+const DEFAULT_TEMP_PASSCODE_EXPIRES_AT = 0;
+const NEWS_RETENTION_HOURS = 48;
+const MACRO_RETENTION_HOURS = 24;
+const NEWS_MAX_ITEMS = 8;
+const MACRO_MAX_ITEMS = 5;
+const LOCATION_SCORE_MODEL_VERSION = 4;
 const BUILT_IN_PRIVATE_CONFIG = {
   molitKey: "960e7b9c681010f60dfea81ec847bf36a664e995219611319701b453bf07433a",
   kakaoKey: "a706a5e96fa435d168f1dfc6a32d6fe1",
@@ -52,28 +65,33 @@ const defaultState = {
       columns: ["sig_cd", "full_nm", "sig_kor_nm", "sig_eng_nm", "ag_geom"],
     },
   ],
-  settings: {
-    molitKey: BUILT_IN_PRIVATE_CONFIG.molitKey,
-    kakaoKey: BUILT_IN_PRIVATE_CONFIG.kakaoKey,
-    vworldKey: BUILT_IN_PRIVATE_CONFIG.vworldKey,
-    vworldDomain: BUILT_IN_PRIVATE_CONFIG.vworldDomain,
-    molitEndpoint: "https://apis.data.go.kr/1613000/RTMSDataSvcAptTradeDev/getRTMSDataSvcAptTradeDev",
-    rentEndpoint: "https://apis.data.go.kr/1613000/RTMSDataSvcAptRent/getRTMSDataSvcAptRent",
-    vworldEndpoint: "https://api.vworld.kr/req/data",
-    lawdCode: "11650",
-    dealMonth: "202606",
-    interestPriceMin: 40000,
-    interestPriceMax: 100000,
-    interestRadiusKm: 15,
-    newsKeywords: "반포동, 광명뉴타운, GTX, 재건축",
-    newsEndpoint: "/api/news",
-    alertThreshold: 3,
-  },
+    settings: {
+      molitKey: BUILT_IN_PRIVATE_CONFIG.molitKey,
+      kakaoKey: BUILT_IN_PRIVATE_CONFIG.kakaoKey,
+      vworldKey: BUILT_IN_PRIVATE_CONFIG.vworldKey,
+      vworldDomain: BUILT_IN_PRIVATE_CONFIG.vworldDomain,
+      interestRegion: "전체",
+      interestPriceMin: 40000,
+      interestPriceMax: 100000,
+      interestRadiusKm: 15,
+      dealMonth: new Date().toISOString().slice(0, 7).replace("-", ""),
+      molitEndpoint: "https://apis.data.go.kr/1613000/RTMSDataSvcAptTradeDev/getRTMSDataSvcAptTradeDev",
+      rentEndpoint: "https://apis.data.go.kr/1613000/RTMSDataSvcAptRent/getRTMSDataSvcAptRent",
+      vworldEndpoint: "https://api.vworld.kr/req/data",
+      newsEndpoint: "/api/news",
+      alertThreshold: 3,
+      recoveryName: DEFAULT_RECOVERY_NAME,
+      recoveryEmail: DEFAULT_RECOVERY_EMAIL,
+    },
   security: {
-    passcodeHash: "",
-    salt: "",
+    passcodeHash: DEFAULT_ADMIN_PASSCODE_HASH,
+    salt: DEFAULT_ADMIN_PASSCODE_SALT,
     failedAttempts: 0,
     lockedUntil: 0,
+    tempPasscodeHash: DEFAULT_TEMP_PASSCODE_HASH,
+    tempPasscodeSalt: DEFAULT_TEMP_PASSCODE_SALT,
+    tempPasscodeExpiresAt: DEFAULT_TEMP_PASSCODE_EXPIRES_AT,
+    resetRequired: false,
   },
   properties: [
     {
@@ -300,7 +318,7 @@ const defaultState = {
       propertyId: "p-3",
       type: "news",
       title: "아현동 정비사업 뉴스 감지",
-      body: "관심 키워드와 매칭된 뉴스가 수집되었습니다.",
+      body: "관심 자산과 매칭된 뉴스가 수집되었습니다.",
       at: "2026-06-20 17:10",
       read: true,
     },
@@ -311,6 +329,20 @@ const defaultState = {
     matchedCount: 0,
     backfillCount: 0,
     lastRunAt: "",
+  },
+  monitoring: {
+    active: false,
+    phase: "대기 중",
+    detail: "모니터링을 실행하면 진행 상태가 표시됩니다.",
+    progress: 0,
+    lastRunAt: "",
+    status: "idle",
+  },
+  macro: {
+    loading: false,
+    lastRunAt: "",
+    fx: null,
+    signals: [],
   },
   propertyTradeHistory: {},
   propertyRentHistory: {},
@@ -327,22 +359,28 @@ const defaultState = {
       id: "t-2",
       propertyId: "p-3",
       kind: "뉴스",
-      text: "아현동 정비사업 키워드 뉴스 수집",
+      text: "아현동 관심 자산 뉴스 수집",
       at: "2026-06-20",
     },
   ],
 };
 
 let state = null;
-let adminUnlocked = true;
+let adminUnlocked = false;
 let adminAutoLockTimer = null;
+let securityRecoveryOpen = false;
+let securityRecoverySending = false;
 let kakaoSdkPromise = null;
 let kakaoMap = null;
 let kakaoMarkers = [];
 let detailPropertyId = null;
 let detailSelectedArea = null;
+let propertyPage = 1;
+let visitPage = 1;
 let newsRequestSeq = 0;
 let deviceResizeTimer = null;
+let batchRefreshTimer = null;
+let hostMode = false;
 let locationScoreDatasetsPromise = null;
 let locationScoreDatasets = null;
 const deviceState = {
@@ -380,18 +418,29 @@ const views = {
     subtitle: "관심 자산, 임장 정보, 외부 API 설정을 직접 입력하고 편집합니다.",
     el: document.querySelector("#adminView"),
   },
+  recovery: {
+    title: "비밀번호 찾기",
+    subtitle: "관리자 이름과 이메일로 임시 비밀번호를 받습니다.",
+    el: document.querySelector("#recoveryView"),
+  },
 };
 
 document.addEventListener("DOMContentLoaded", async () => {
   await hydratePrivateConfig();
   state = loadState();
+  hostMode = isHostMode();
+  document.documentElement.dataset.host = hostMode ? "toss" : "web";
+  document.body.dataset.host = hostMode ? "toss" : "web";
   updateDeviceProfile();
   bindNavigation();
   bindForms();
   render();
+  await rebuildLocationScores();
+  render();
   setTimeout(() => {
     void runMonitor();
   }, 150);
+  startBatchRefresh();
   window.addEventListener("resize", scheduleDeviceProfileUpdate);
   window.addEventListener("orientationchange", scheduleDeviceProfileUpdate);
   window.visualViewport?.addEventListener("resize", scheduleDeviceProfileUpdate);
@@ -421,26 +470,32 @@ async function hydratePrivateConfig() {
 
 function updateDeviceProfile() {
   const profile = getDeviceProfile();
-  if (deviceState.profile === profile) return;
+  if (deviceState.profile === profile) return false;
   deviceState.profile = profile;
   document.documentElement.dataset.device = profile;
   document.body.dataset.device = profile;
+  return true;
 }
 
 function scheduleDeviceProfileUpdate() {
   window.clearTimeout(deviceResizeTimer);
   deviceResizeTimer = window.setTimeout(() => {
-    updateDeviceProfile();
-    renderMap();
+    const changed = updateDeviceProfile();
+    if (changed) render();
+    else renderMap();
   }, 120);
+}
+
+function isHostMode() {
+  const path = window.location.pathname || "";
+  const host = new URLSearchParams(window.location.search).get("host");
+  return path === "/toss" || path === "/miniapp" || host === "toss";
 }
 
 function getDeviceProfile() {
   const width = window.innerWidth || document.documentElement.clientWidth || 1280;
-  const coarse = window.matchMedia?.("(pointer: coarse)")?.matches || false;
-  const touch = coarse || navigator.maxTouchPoints > 0;
-  if (width <= 760 || (touch && width <= 940)) return "mobile";
-  if (width <= 1320) return "laptop";
+  if (width <= 720) return "mobile";
+  if (width <= 1120) return "laptop";
   return "desktop";
 }
 
@@ -449,7 +504,7 @@ function loadState() {
   if (!raw) return withPrivateConfig(structuredClone(defaultState));
   try {
     const parsed = JSON.parse(raw);
-    return withPrivateConfig({
+    const nextState = withPrivateConfig({
       ...structuredClone(defaultState),
       ...parsed,
       settings: {
@@ -459,6 +514,12 @@ function loadState() {
       security: {
         ...structuredClone(defaultState.security),
         ...parsed.security,
+        passcodeHash: parsed.security?.passcodeHash || defaultState.security.passcodeHash,
+        salt: parsed.security?.salt || defaultState.security.salt,
+        tempPasscodeHash: parsed.security?.tempPasscodeHash || defaultState.security.tempPasscodeHash,
+        tempPasscodeSalt: parsed.security?.tempPasscodeSalt || defaultState.security.tempPasscodeSalt,
+        tempPasscodeExpiresAt: parsed.security?.tempPasscodeExpiresAt || defaultState.security.tempPasscodeExpiresAt,
+        resetRequired: Boolean(parsed.security?.resetRequired || defaultState.security.resetRequired),
       },
       propertyTradeHistory: parsed.propertyTradeHistory || {},
       propertyRentHistory: parsed.propertyRentHistory || {},
@@ -467,8 +528,17 @@ function loadState() {
         ...structuredClone(defaultState.monitorSummary),
         ...parsed.monitorSummary,
       },
+      monitoring: {
+        ...structuredClone(defaultState.monitoring),
+        ...parsed.monitoring,
+      },
+      macro: {
+        ...structuredClone(defaultState.macro),
+        ...parsed.macro,
+      },
       sourceDatasets: mergeById(defaultState.sourceDatasets, parsed.sourceDatasets || []),
     });
+    return pruneEphemeralCollections(nextState);
   } catch {
     return withPrivateConfig(structuredClone(defaultState));
   }
@@ -488,15 +558,16 @@ function withPrivateConfig(nextState) {
 
 function mergeTrackedProperties(properties) {
   const byName = new Map(properties.map((property) => [property.name, property]));
+  const byNormalizedName = new Map(properties.map((property) => [normalizeText(property.name), property]));
   const tracked = defaultState.properties.filter((property) => property.tags?.includes("관심단지"));
-  const missing = tracked.filter((property) => !byName.has(property.name));
+  const missing = tracked.filter((property) => !byName.has(property.name) && !byNormalizedName.has(normalizeText(property.name)));
   return [...properties, ...missing];
 }
 
 function hydrateProperties(properties) {
   return properties.map((property, index) => {
     const defaultMatch = defaultState.properties.find((item) => (
-      item.id === property.id || item.name === property.name
+      item.id === property.id || item.name === property.name || normalizeText(item.name) === normalizeText(property.name)
     ));
     const fallback = fallbackCoordinate(index);
     const hasStoredCoordinate = Boolean(property.lat && property.lng);
@@ -518,9 +589,26 @@ function hydrateProperties(properties) {
       fitScoreSource: property.fitScoreSource || defaultMatch?.fitScoreSource || "",
       aliases: isDefaultTracked ? defaultMatch.aliases || [] : property.aliases || defaultMatch?.aliases || [],
       expectedDistricts: isDefaultTracked ? defaultMatch.expectedDistricts || [] : property.expectedDistricts || defaultMatch?.expectedDistricts || [],
-      tags: isDefaultTracked ? defaultMatch.tags || [] : property.tags || defaultMatch?.tags || [],
+      tags: sanitizeTags(isDefaultTracked ? defaultMatch.tags || [] : property.tags || defaultMatch?.tags || []),
+      masterId: defaultMatch?.id || property.masterId || property.id,
+      masterName: defaultMatch?.name || property.masterName || property.name,
+      locationEvidence: shouldResetLocationEvidence(property) ? null : property.locationEvidence || null,
+      locationScore: shouldResetLocationEvidence(property) ? null : property.locationScore || null,
+      gbR001: shouldResetLocationEvidence(property) ? null : property.gbR001 || null,
+      fitScoreSource: shouldResetLocationEvidence(property) ? "" : property.fitScoreSource || defaultMatch?.fitScoreSource || "",
+      fitScore: shouldResetLocationEvidence(property) ? 0 : property.fitScore,
     };
   });
+}
+
+function shouldResetLocationEvidence(property) {
+  const version = Number(property?.locationEvidence?.modelVersion || 0);
+  if (version && version >= LOCATION_SCORE_MODEL_VERSION) return false;
+  return Boolean(property?.locationEvidence || property?.locationScore || property?.gbR001 || property?.fitScoreSource);
+}
+
+function sanitizeTags(tags) {
+  return [...new Set((tags || []).filter((tag) => tag && tag !== "검색추가"))];
 }
 
 function fallbackCoordinate(index) {
@@ -538,7 +626,51 @@ function mergeById(defaultItems, storedItems) {
 }
 
 function saveState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(pruneEphemeralCollections(state)));
+}
+
+function pruneEphemeralCollections(nextState) {
+  const pruned = nextState;
+  const now = Date.now();
+  const newsCutoff = now - NEWS_RETENTION_HOURS * 60 * 60 * 1000;
+  const macroCutoff = now - MACRO_RETENTION_HOURS * 60 * 60 * 1000;
+  if (Array.isArray(pruned.news)) {
+    pruned.news = pruned.news
+      .filter((item) => {
+        const timestamp = newsTimestamp(item?.at);
+        return Number.isFinite(timestamp) ? timestamp >= newsCutoff : true;
+      })
+      .slice(0, NEWS_MAX_ITEMS)
+      .map((item) => ({
+        ...item,
+        summary: String(item.summary || "").slice(0, 180),
+        title: String(item.title || "").slice(0, 120),
+      }));
+  }
+  if (pruned.macro) {
+    const signals = Array.isArray(pruned.macro.signals) ? pruned.macro.signals : [];
+    pruned.macro = {
+      ...pruned.macro,
+      signals: signals
+        .filter((signal) => {
+          const timestamp = newsTimestamp(signal?.at);
+          return Number.isFinite(timestamp) ? timestamp >= macroCutoff : true;
+        })
+        .slice(0, MACRO_MAX_ITEMS)
+        .map((signal) => ({
+          ...signal,
+          summary: String(signal.summary || "").slice(0, 160),
+          title: String(signal.title || "").slice(0, 120),
+        })),
+    };
+  }
+  return pruned;
+}
+
+function newsTimestamp(value) {
+  if (!value) return Number.NaN;
+  const parsed = Date.parse(String(value).replace(/\./g, "-"));
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
 }
 
 function bindNavigation() {
@@ -549,17 +681,10 @@ function bindNavigation() {
     });
   });
 
-  document.querySelector("#seedButton").addEventListener("click", () => {
-    const preservedSettings = state.settings;
-    state = structuredClone(defaultState);
-    state.settings = { ...state.settings, ...preservedSettings };
-    adminUnlocked = true;
-    saveState();
-    render();
+  document.querySelector("#watchSearch").addEventListener("input", () => {
+    propertyPage = 1;
+    renderProperties();
   });
-
-  document.querySelector("#watchSearch").addEventListener("input", renderProperties);
-  document.querySelector("#regionFilter").addEventListener("change", renderMap);
   document.querySelector("#mapSearchButton").addEventListener("click", addMapSearchResult);
   document.querySelector("#mapSearch").addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
@@ -573,10 +698,20 @@ function bindNavigation() {
       renderPropertyDetail();
     }
   });
+  document.querySelector("#detailEvidenceTrigger")?.addEventListener("click", () => {
+    if (detailPropertyId) openPropertyEvidence(detailPropertyId);
+  });
   document.querySelectorAll("[data-close-detail]").forEach((button) => {
     button.addEventListener("click", closePropertyDetail);
   });
+  document.querySelectorAll("[data-close-evidence]").forEach((button) => {
+    button.addEventListener("click", closePropertyEvidence);
+  });
   document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !document.querySelector("#evidenceModal").hidden) {
+      closePropertyEvidence();
+      return;
+    }
     if (event.key === "Escape" && !document.querySelector("#detailModal").hidden) {
       closePropertyDetail();
     }
@@ -589,6 +724,8 @@ function bindNavigation() {
   document.querySelector("#runMonitorButton").addEventListener("click", () => {
     runMonitor();
   });
+  document.addEventListener("change", handleFilterChange);
+  document.addEventListener("click", handleFilterClick);
 }
 
 function setView(view) {
@@ -598,8 +735,10 @@ function setView(view) {
   document.querySelectorAll(".nav-item").forEach((item) => {
     item.classList.toggle("active", item.dataset.view === view);
   });
+  document.body.classList.toggle("admin-light-shell", view === "admin");
   document.querySelector("#viewTitle").textContent = views[view].title;
   document.querySelector("#viewSubtitle").textContent = views[view].subtitle;
+  renderTopActions(view);
   if (view === "dashboard") {
     window.requestAnimationFrame(() => renderMap());
   }
@@ -625,7 +764,7 @@ function bindForms() {
       area: Number(value("#propertyArea")),
       baseArea: Number(value("#propertyBaseArea") || value("#propertyArea") || existing?.baseArea || existing?.area || 84),
       price: Number(value("#propertyPrice")),
-      lastTradeDate: existing?.lastTradeDate || new Date().toISOString().slice(0, 10),
+      lastTradeDate: existing?.lastTradeDate || "",
       lastTradeFloor: existing?.lastTradeFloor || 0,
       buildYear: existing?.buildYear || "",
       rentDeposit: existing?.rentDeposit || 0,
@@ -689,23 +828,37 @@ function bindForms() {
       molitEndpoint: state.settings.molitEndpoint || defaultState.settings.molitEndpoint,
       rentEndpoint: state.settings.rentEndpoint || defaultState.settings.rentEndpoint,
       vworldEndpoint: state.settings.vworldEndpoint || defaultState.settings.vworldEndpoint,
-      lawdCode: value("#lawdCode"),
-      dealMonth: value("#dealMonth"),
-      interestPriceMin: Number(value("#interestPriceMin") || 40000),
-      interestPriceMax: Number(value("#interestPriceMax") || 100000),
-      interestRadiusKm: Number(value("#interestRadiusKm") || 15),
-      newsKeywords: value("#newsKeywords"),
       newsEndpoint: value("#newsEndpoint"),
       alertThreshold: Number(value("#alertThreshold") || 3),
+      recoveryName: state.settings.recoveryName || defaultState.settings.recoveryName,
+      recoveryEmail: state.settings.recoveryEmail || defaultState.settings.recoveryEmail,
     };
     saveState();
     render();
   });
 
-  document.querySelector("#securityForm")?.addEventListener("submit", (event) => {
-    event.preventDefault();
+  document.querySelector("#lockAdminButton")?.addEventListener("click", () => {
+    lockAdmin();
   });
-  document.querySelector("#lockAdminButton")?.addEventListener("click", () => {});
+  document.querySelector("#showRecoveryButton")?.addEventListener("click", () => openRecoveryScreen());
+  document.querySelector("#securityForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (state.security.resetRequired) {
+      await saveNewAdminPasscode();
+      return;
+    }
+    await unlockOrSetAdminPasscode();
+  });
+  document.querySelector("#backToAdminButton")?.addEventListener("click", () => {
+    setView("admin");
+  });
+  document.querySelector("#recoveryForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await sendRecoveryEmail();
+  });
+  document.querySelector("#saveNewPasscodeButton")?.addEventListener("click", () => {
+    saveNewAdminPasscode();
+  });
 }
 
 function value(selector) {
@@ -714,12 +867,16 @@ function value(selector) {
 
 function render(options = {}) {
   const skipMap = Boolean(options.skipMap);
+  renderTopActions(getActiveView());
+  renderHostTabs();
   renderSettings();
   renderSecurity();
+  renderFilterBars();
   renderMetrics();
-  renderRegionFilter();
+  renderMonitorStatus();
   if (!skipMap) renderMap();
   renderToday();
+  renderMacro();
   renderTimeline();
   renderNews();
   renderProperties();
@@ -728,53 +885,164 @@ function render(options = {}) {
   renderAdminOptions();
 }
 
+function startBatchRefresh() {
+  window.clearInterval(batchRefreshTimer);
+  batchRefreshTimer = window.setInterval(() => {
+    if (document.hidden) return;
+    void runSignalBatch();
+  }, 15 * 60 * 1000);
+}
+
 function renderSecurity() {
-  const status = document.querySelector("#securityStatus");
-  if (!status) return;
-  const lockableForms = ["#propertyForm", "#visitForm", "#sourceForm"].map((selector) => document.querySelector(selector));
-
-  lockableForms.forEach((form) => {
-    form.classList.remove("locked");
-    form.querySelectorAll("input, select, textarea, button").forEach((control) => {
-      control.disabled = false;
-    });
+  const status = document.querySelector("#adminAccessStatus");
+  const locked = !adminUnlocked;
+  const activeView = getActiveView();
+  const adminView = document.querySelector("#adminView");
+  if (adminView) adminView.classList.toggle("locked", locked);
+  const accessPanel = document.querySelector("#adminAccessPanel");
+  const accessForm = document.querySelector("#securityForm");
+  const accessActions = document.querySelector("#adminAccessActions");
+  const recoveryProgress = document.querySelector("#recoveryProgress");
+  const recoveryProgressTitle = document.querySelector("#recoveryProgressTitle");
+  const recoveryProgressText = document.querySelector("#recoveryProgressText");
+  const resetFields = document.querySelector("#securityResetFields");
+  if (!locked && activeView !== "recovery") {
+    securityRecoveryOpen = false;
+    state.security.resetRequired = false;
+  }
+  if (resetFields) resetFields.hidden = !state.security.resetRequired;
+  if (accessPanel) accessPanel.hidden = false;
+  if (accessForm) accessForm.hidden = !locked;
+  if (accessActions) accessActions.hidden = locked;
+  if (recoveryProgress) {
+    recoveryProgress.hidden = !securityRecoverySending && !state.security.tempPasscodeHash && !state.security.resetRequired;
+    if (securityRecoverySending) {
+      recoveryProgressTitle.textContent = "보내는 중";
+      recoveryProgressText.textContent = "잠시만 기다려 주세요.";
+    } else if (state.security.resetRequired) {
+      recoveryProgressTitle.textContent = "임시 비밀번호 확인됨";
+      recoveryProgressText.textContent = "이제 새 비밀번호를 설정하세요.";
+    } else if (state.security.tempPasscodeHash) {
+      recoveryProgressTitle.textContent = "대기 중";
+      recoveryProgressText.textContent = "발송 결과를 확인하세요.";
+    }
+  }
+  ["#propertyForm", "#visitForm", "#sourceForm", "#adminLogPanel"].forEach((selector) => {
+    const panel = document.querySelector(selector);
+    if (!panel) return;
+    panel.hidden = locked;
   });
+  if (status) {
+    if (!locked) {
+      status.textContent = "잠금 해제됨.";
+    } else if (state.security.resetRequired) {
+      status.textContent = "임시 비밀번호가 확인되었습니다.";
+    } else if (securityRecoverySending) {
+      status.textContent = "임시 비밀번호를 보내는 중입니다...";
+    } else {
+      status.textContent = "잠금 상태입니다.";
+    }
+  }
+}
 
-  adminUnlocked = true;
-  status.textContent = "Admin 잠금 해제됨. MVP 검증을 위해 입력/수정/모니터링을 바로 사용할 수 있습니다.";
+function setSecurityMessage(message) {
+  const status = document.querySelector("#adminAccessStatus");
+  if (status) status.textContent = message;
+  const summary = document.querySelector("#recoverySummary");
+  if (summary) summary.textContent = message;
 }
 
 function renderSettings() {
   syncEffectiveSettings();
-  const effectiveMolitKey = getEffectiveSetting("molitKey");
-  const effectiveKakaoKey = getEffectiveSetting("kakaoKey");
-  const effectiveVworldKey = getEffectiveSetting("vworldKey");
-  const effectiveVworldDomain = getEffectiveSetting("vworldDomain") || window.location.origin;
-  document.querySelector("#molitStatus").textContent = "설정됨";
+  const locked = !adminUnlocked;
+  const effectiveMolitKey = locked ? "" : getEffectiveSetting("molitKey");
+  const effectiveKakaoKey = locked ? "" : getEffectiveSetting("kakaoKey");
+  const effectiveVworldKey = locked ? "" : getEffectiveSetting("vworldKey");
+  const effectiveVworldDomain = locked ? "" : (getEffectiveSetting("vworldDomain") || window.location.origin);
+  document.querySelector("#molitStatus").textContent = locked ? "잠금" : "설정됨";
   const monitorSummary = state.monitorSummary || defaultState.monitorSummary;
-  const monitorText = [
-    `${monitorSummary.tradeCount || 0}건 매매`,
-    `${monitorSummary.rentCount || 0}건 전월세`,
-    `${monitorSummary.matchedCount || 0}개 반영`,
-    monitorSummary.backfillCount ? `보강 ${monitorSummary.backfillCount}개` : "보강 0개",
-  ].join(" · ");
+  const monitorText = `${monitorSummary.tradeCount || 0}건 매매 · ${monitorSummary.rentCount || 0}건 전월세 · ${monitorSummary.matchedCount || 0}개 반영${monitorSummary.backfillCount ? ` · 보강 ${monitorSummary.backfillCount}개` : ""}`;
   const monitorNode = document.querySelector("#monitorStatus");
-  if (monitorNode) monitorNode.textContent = monitorText;
-  document.querySelector("#molitEndpoint").value = state.settings.molitEndpoint || defaultState.settings.molitEndpoint;
-  document.querySelector("#rentEndpoint").value = state.settings.rentEndpoint || defaultState.settings.rentEndpoint;
-  document.querySelector("#vworldEndpoint").value = buildVworldBoundaryUrl({ includeKey: false });
+  if (monitorNode) {
+    monitorNode.innerHTML = locked ? "잠금" : `
+      <span class="monitor-chip">${monitorSummary.tradeCount || 0}건 매매</span>
+      <span class="monitor-chip">${monitorSummary.rentCount || 0}건 전월세</span>
+      <span class="monitor-chip">${monitorSummary.matchedCount || 0}개 반영</span>
+      ${monitorSummary.backfillCount ? `<span class="monitor-chip subtle">보강 ${monitorSummary.backfillCount}개</span>` : ""}
+    `;
+  }
+  const tradeSyncNode = document.querySelector("#tradeSyncStatus");
+  const rentSyncNode = document.querySelector("#rentSyncStatus");
+  const sourceSyncNode = document.querySelector("#sourceSyncStatus");
+  if (tradeSyncNode) tradeSyncNode.textContent = locked ? "잠금" : "확인됨";
+  if (rentSyncNode) rentSyncNode.textContent = locked ? "잠금" : "확인됨";
+  if (sourceSyncNode) sourceSyncNode.textContent = locked
+    ? "잠금"
+    : "확인됨";
+  document.querySelector("#molitEndpoint").value = locked ? "" : (state.settings.molitEndpoint || defaultState.settings.molitEndpoint);
+  document.querySelector("#rentEndpoint").value = locked ? "" : (state.settings.rentEndpoint || defaultState.settings.rentEndpoint);
+  document.querySelector("#vworldEndpoint").value = locked ? "" : buildVworldBoundaryUrl({ includeKey: false });
   document.querySelector("#molitKey").value = effectiveMolitKey;
   document.querySelector("#kakaoKey").value = effectiveKakaoKey;
   document.querySelector("#vworldKey").value = effectiveVworldKey;
   document.querySelector("#vworldDomain").value = effectiveVworldDomain;
-  document.querySelector("#lawdCode").value = state.settings.lawdCode || "";
-  document.querySelector("#dealMonth").value = state.settings.dealMonth || "";
-  document.querySelector("#interestPriceMin").value = state.settings.interestPriceMin || 40000;
-  document.querySelector("#interestPriceMax").value = state.settings.interestPriceMax || 100000;
-  document.querySelector("#interestRadiusKm").value = state.settings.interestRadiusKm || 15;
-  document.querySelector("#newsKeywords").value = state.settings.newsKeywords;
-  document.querySelector("#newsEndpoint").value = state.settings.newsEndpoint || "/api/news";
-  document.querySelector("#alertThreshold").value = state.settings.alertThreshold;
+  document.querySelector("#newsEndpoint").value = locked ? "" : (state.settings.newsEndpoint || "/api/news");
+  document.querySelector("#alertThreshold").value = locked ? "" : state.settings.alertThreshold;
+  const recoveryNameInput = document.querySelector("#recoveryName");
+  const recoveryEmailInput = document.querySelector("#recoveryEmail");
+  if (recoveryNameInput) recoveryNameInput.value = "";
+  if (recoveryEmailInput) recoveryEmailInput.value = "";
+}
+
+function renderMonitorStatus() {
+  const status = document.querySelector("#monitorBanner");
+  const button = document.querySelector("#runMonitorButton");
+  const monitoring = state.monitoring || defaultState.monitoring;
+  if (button) {
+    button.disabled = Boolean(monitoring.active);
+    button.textContent = monitoring.active ? "모니터링 중" : "모니터링 실행";
+  }
+  if (!status) return;
+
+  if (monitoring.active) {
+    status.innerHTML = `
+      <div class="monitor-pill active">
+        <span>${escapeHtml(monitoring.phase || "진행 중")}</span>
+        <strong>${escapeHtml(monitoring.detail || "처리 중입니다.")}</strong>
+      </div>
+      <div class="monitor-progress"><span style="width:${Math.max(8, Math.min(100, monitoring.progress || 0))}%"></span></div>
+    `;
+    return;
+  }
+
+  if (monitoring.status === "done") {
+    status.innerHTML = `
+      <div class="monitor-pill done">
+        <span>마지막 실행</span>
+        <strong>${escapeHtml(monitoring.phase || "완료")} · ${escapeHtml(monitoring.detail || "처리 완료")}</strong>
+      </div>
+      <div class="monitor-meta">${escapeHtml(monitoring.lastRunAt || state.monitorSummary?.lastRunAt || "")}</div>
+    `;
+    return;
+  }
+
+  if (monitoring.status === "error") {
+    status.innerHTML = `
+      <div class="monitor-pill error">
+        <span>실패</span>
+        <strong>${escapeHtml(monitoring.detail || "처리 중 오류가 발생했습니다.")}</strong>
+      </div>
+      <div class="monitor-meta">${escapeHtml(monitoring.lastRunAt || "")}</div>
+    `;
+    return;
+  }
+
+  status.innerHTML = `
+    <div class="monitor-pill idle">
+      <span>대기 중</span>
+      <strong>${escapeHtml(monitoring.detail || "모니터링을 실행하면 진행 상태가 표시됩니다.")}</strong>
+    </div>
+  `;
 }
 
 function getEffectiveSetting(key) {
@@ -801,26 +1069,145 @@ function renderMetrics() {
   document.querySelector("#metricVisits").textContent = visited;
 }
 
-function renderRegionFilter() {
-  const select = document.querySelector("#regionFilter");
-  const current = select.value;
-  const regions = ["전체", ...new Set(state.properties.map((property) => property.region.split(" ").slice(0, 2).join(" ")))];
-  select.innerHTML = regions.map((region) => `<option>${escapeHtml(region)}</option>`).join("");
-  select.value = regions.includes(current) ? current : "전체";
+function renderFilterBars() {
+  const regions = buildInterestRegions();
+  const months = buildDealMonthOptions();
+  const radiusOptions = [5, 10, 15, 20, 30];
+  const currentRegion = String(state.settings.interestRegion || "전체");
+  const currentMonth = String(state.settings.dealMonth || getCurrentDealMonth());
+  const currentMin = Number(state.settings.interestPriceMin || 40000);
+  const currentMax = Number(state.settings.interestPriceMax || 100000);
+  const currentRadius = Number(state.settings.interestRadiusKm || 15);
+  const summary = `${currentRegion} · ${formatDealMonthLabel(currentMonth)} · ${formatPrice(currentMin)} ~ ${formatPrice(currentMax)} · 반경 ${currentRadius}km`;
+
+  [
+    { selector: "#dashboardFilterBar", scope: "dashboard" },
+    { selector: "#watchlistFilterBar", scope: "watchlist" },
+  ].forEach(({ selector, scope }) => {
+    const container = document.querySelector(selector);
+    if (!container) return;
+    container.innerHTML = `
+      <div class="filter-head">
+        <div>
+          <strong>조회 필터</strong>
+          <p>${scope === "dashboard" ? "대시보드" : "관심목록"}에서만 보이는 필터입니다.</p>
+        </div>
+        <button type="button" class="ghost" data-filter-reset>기본값</button>
+      </div>
+      <div class="filter-grid">
+        <label>
+          지역
+          <select data-filter-key="interestRegion" data-filter-type="select">
+            ${regions.map((region) => `<option ${region === currentRegion ? "selected" : ""}>${escapeHtml(region)}</option>`).join("")}
+          </select>
+        </label>
+        <label>
+          계약연월
+          <select data-filter-key="dealMonth" data-filter-type="select">
+            ${months.map((month) => `<option value="${month.value}" ${month.value === currentMonth ? "selected" : ""}>${escapeHtml(month.label)}</option>`).join("")}
+          </select>
+        </label>
+        <label>
+          가격 하한
+          <input data-filter-key="interestPriceMin" data-filter-type="number" type="number" min="0" step="100" value="${currentMin}" />
+        </label>
+        <label>
+          가격 상한
+          <input data-filter-key="interestPriceMax" data-filter-type="number" type="number" min="0" step="100" value="${currentMax}" />
+        </label>
+        <label>
+          반경
+          <select data-filter-key="interestRadiusKm" data-filter-type="select">
+            ${radiusOptions.map((radius) => `<option value="${radius}" ${radius === currentRadius ? "selected" : ""}>${radius}km</option>`).join("")}
+          </select>
+        </label>
+      </div>
+      <div class="filter-summary">${escapeHtml(summary)}</div>
+    `;
+  });
+}
+
+function handleFilterChange(event) {
+  const target = event.target;
+  if (!target) return;
+  const field = target.closest?.("[data-filter-key]");
+  if (!field) return;
+  const key = field.dataset.filterKey;
+  if (!key) return;
+  const nextValue = field.dataset.filterType === "number" && field.value === ""
+    ? defaultState.settings[key]
+    : (field.dataset.filterType === "number" ? Number(field.value) : field.value);
+  if (key === "interestPriceMin" || key === "interestPriceMax" || key === "interestRadiusKm") {
+    state.settings[key] = Number.isFinite(nextValue) ? nextValue : defaultState.settings[key];
+  } else {
+    state.settings[key] = String(nextValue || "");
+  }
+  if (key === "interestPriceMin" || key === "interestPriceMax") {
+    const min = Number(state.settings.interestPriceMin || 0);
+    const max = Number(state.settings.interestPriceMax || 0);
+    if (min && max && min > max) {
+      if (key === "interestPriceMin") {
+        state.settings.interestPriceMax = min;
+      } else {
+        state.settings.interestPriceMin = max;
+      }
+    }
+  }
+  saveState();
+  render();
+  if (key === "dealMonth") void runMonitor();
+}
+
+function handleFilterClick(event) {
+  const reset = event.target?.closest?.("[data-filter-reset]");
+  if (!reset) return;
+  event.preventDefault();
+  resetInterestFilters();
+}
+
+function resetInterestFilters() {
+  state.settings.interestRegion = defaultState.settings.interestRegion;
+  state.settings.dealMonth = getCurrentDealMonth();
+  state.settings.interestPriceMin = defaultState.settings.interestPriceMin;
+  state.settings.interestPriceMax = defaultState.settings.interestPriceMax;
+  state.settings.interestRadiusKm = defaultState.settings.interestRadiusKm;
+  saveState();
+  render();
+  void runMonitor();
+}
+
+function buildInterestRegions() {
+  return ["전체", ...new Set(state.properties.map((property) => property.region.split(" ").slice(0, 2).join(" ")).filter(Boolean))];
+}
+
+function buildDealMonthOptions() {
+  const current = getCurrentDealMonth();
+  const labels = getRecentDealMonths(current, 12).map((month) => ({
+    value: month,
+    label: formatDealMonthLabel(month),
+  }));
+  return labels;
+}
+
+function formatDealMonthLabel(value) {
+  const text = String(value || "");
+  if (text.length !== 6) return text;
+  return `${text.slice(0, 4)}-${text.slice(4, 6)}`;
+}
+
+function getCurrentDealMonth() {
+  return new Date().toISOString().slice(0, 7).replace("-", "");
 }
 
 function renderMap() {
   syncEffectiveSettings();
-  const selected = document.querySelector("#regionFilter").value || "전체";
   const map = document.querySelector("#mapCanvas");
-  const properties = getInterestZoneProperties().filter((property) => (
-    selected === "전체" ? true : property.region.startsWith(selected)
-  ));
+  const properties = getInterestZoneProperties();
   recenterMapToProperties(properties);
   const kakaoKey = getEffectiveSetting("kakaoKey");
   const vworldKey = getEffectiveSetting("vworldKey");
   const molitKey = getEffectiveSetting("molitKey");
-  const keyStatus = `국토부 설정됨 · 지도 ${kakaoKey ? "Kakao" : vworldKey ? "VWorld" : "Kakao"}`;
+  const keyStatus = `국토부 설정됨 · 지도 ${kakaoKey ? "Kakao" : vworldKey ? "VWorld" : "OSM"}`;
 
   if (kakaoKey) {
     renderKakaoMap(map, properties, kakaoKey, keyStatus);
@@ -869,7 +1256,7 @@ function renderRasterMap(map, properties, provider = "OSM", vworldKey = "") {
       <button type="button" data-map-zoom="in" aria-label="확대">+</button>
       <button type="button" data-map-zoom="out" aria-label="축소">-</button>
     </div>
-    <div class="map-note">${provider} · zoom ${mapState.zoom} · 기본 구역 ${formatPrice(state.settings.interestPriceMin)} ~ ${formatPrice(state.settings.interestPriceMax)}</div>
+    <div class="map-note">${provider} · ${formatDealMonthLabel(state.settings.dealMonth || getCurrentDealMonth())} · ${formatPrice(state.settings.interestPriceMin)} ~ ${formatPrice(state.settings.interestPriceMax)} · 반경 ${Number(state.settings.interestRadiusKm || 15)}km</div>
   `;
 
   map.querySelectorAll("[data-edit]").forEach((button) => {
@@ -1105,12 +1492,14 @@ function getInterestZoneProperties() {
   const minPrice = Number(state.settings.interestPriceMin || 40000);
   const maxPrice = Number(state.settings.interestPriceMax || 100000);
   const radiusKm = Number(state.settings.interestRadiusKm || 15);
+  const selectedRegion = String(state.settings.interestRegion || "전체");
 
   return state.properties.filter((property) => {
     const price = Number(property.price || 0);
     const withinPrice = !price || (price >= minPrice && price <= maxPrice);
     const withinArea = isNearGangnam(property, radiusKm);
-    return withinPrice && withinArea;
+    const withinRegion = selectedRegion === "전체" ? true : String(property.region || "").startsWith(selectedRegion);
+    return withinPrice && withinArea && withinRegion;
   });
 }
 
@@ -1148,7 +1537,7 @@ function addMapSearchResult() {
 
   const places = new kakao.maps.services.Places();
   kakaoKeywordSearch(places, query).then(async (results) => {
-    const first = selectBestPlace(results, { name: query, expectedDistricts: ["성남"] }) || results[0];
+    const first = selectBestPlace(results, { name: query, region: query }) || results[0];
     if (!first) {
       document.querySelector("#mapSearch").value = "";
       document.querySelector("#mapSearch").placeholder = "검색 결과가 없습니다.";
@@ -1173,7 +1562,7 @@ function addMapSearchResult() {
       change: existing?.change || 0,
       fitScore: existing?.fitScore || 0,
       subwayDistance: existing?.subwayDistance || 0,
-      tags: existing?.tags || ["검색추가"],
+      tags: sanitizeTags(existing?.tags || []),
       risk: existing?.risk || "검색으로 추가됨. 실거래와 임장 정보 입력 필요.",
       lat: Number(first.y),
       lng: Number(first.x),
@@ -1272,7 +1661,9 @@ function getOsmTileUrl(x, y, z) {
 
 function renderToday() {
   const list = document.querySelector("#todayList");
+  const visiblePropertyIds = new Set(getInterestZoneProperties().map((property) => property.id));
   const hot = state.properties
+    .filter((property) => visiblePropertyIds.has(property.id))
     .filter((property) => Math.abs(property.change) >= state.settings.alertThreshold)
     .slice(0, 5);
   const dataset = state.sourceDatasets?.find((item) => item.id === "gb_r001");
@@ -1281,7 +1672,7 @@ function renderToday() {
     <div class="today-item">
       <div>
         <strong>${escapeHtml(property.name)}</strong>
-        <div class="muted">${escapeHtml(property.region)}${property.fitScore ? ` · 입지 ${formatScore(property.fitScore)}` : ""} · ${escapeHtml(property.risk || "리스크 메모 없음")}</div>
+        <div class="muted">${escapeHtml(property.region)} · ${escapeHtml(property.risk || "리스크 메모 없음")}</div>
       </div>
       <span class="badge ${property.change < 0 ? "amber" : "red"}">${property.change > 0 ? "+" : ""}${property.change}%</span>
     </div>
@@ -1291,13 +1682,52 @@ function renderToday() {
     <div class="today-item">
       <div>
         <strong>입지 점수 데이터 반영</strong>
-        <div class="muted">${escapeHtml(dataset.name)} · ${dataset.records.toLocaleString()}개 폴리곤 · 평균 ${dataset.totalScoreAverage}, 최고 ${dataset.totalScoreMax}</div>
+        <div class="muted">${escapeHtml(dataset.name)} · ${dataset.records.toLocaleString()}개 데이터</div>
       </div>
       <span class="badge">입지</span>
     </div>
   ` : "";
 
   list.innerHTML = hotItems + sourceItem;
+}
+
+function renderMacro() {
+  const feed = document.querySelector("#macroFeed");
+  if (!feed) return;
+  const macro = state.macro || defaultState.macro;
+  if (macro.loading) {
+    feed.innerHTML = `<p>거시 변수를 수집하는 중입니다.</p>`;
+    return;
+  }
+  if (!macro.fx && !(macro.signals || []).length) {
+    feed.innerHTML = `<p>거시 모니터 결과가 없습니다. 정책, 주택, 대출, 금리, 전세 변수를 확인할 수 있습니다.</p>`;
+    return;
+  }
+  const fxCard = macro.fx ? `
+    <article class="macro-card">
+      <span class="badge">환율</span>
+      <strong>${escapeHtml(macro.fx.label || "USD/KRW")}</strong>
+      <p>${escapeHtml(macro.fx.value || "미입력")}</p>
+      <div class="muted">${escapeHtml(macro.fx.source || "실시간 스냅샷")} · ${escapeHtml(macro.fx.at || "")}</div>
+    </article>
+  ` : `
+    <article class="macro-card">
+      <span class="badge">환율</span>
+      <strong>미입력</strong>
+      <p>환율 스냅샷을 아직 불러오지 못했습니다.</p>
+    </article>
+  `;
+
+  const signalCards = (macro.signals || []).map((signal) => `
+    <article class="macro-card">
+      <span class="badge">${escapeHtml(signal.label || "거시")}</span>
+      <strong>${escapeHtml(signal.title || "미입력")}</strong>
+      <p>${escapeHtml(signal.summary || "거시 신호를 확인 중입니다.")}</p>
+      <div class="muted">${escapeHtml(signal.source || "외부 수집")} · ${escapeHtml(signal.at || "")}</div>
+    </article>
+  `).join("");
+
+  feed.innerHTML = fxCard + signalCards;
 }
 
 function renderTimeline() {
@@ -1322,13 +1752,11 @@ function renderNews() {
     feed.innerHTML = `<p>뉴스를 비동기로 수집하는 중입니다.</p>`;
     return;
   }
-  const keywords = getNewsKeywords();
+  const visiblePropertyIds = new Set(getInterestZoneProperties().map((property) => property.id));
   const news = state.news
     .filter((item) => {
       const property = findProperty(item.propertyId);
-      if (item.propertyId && !property) return false;
-      const haystack = [item.keyword, item.title, item.summary, property?.name, property?.region].join(" ");
-      return keywords.some((keyword) => haystack.includes(keyword));
+      return Boolean(property && visiblePropertyIds.has(property.id));
     })
     .slice(0, 6);
 
@@ -1338,58 +1766,49 @@ function renderNews() {
     const summary = cleanNewsText(item.summary).slice(0, 180);
     return `
       <article class="news-card">
-        <span class="badge">${escapeHtml(cleanNewsText(item.keyword))}</span>
+        <span class="badge">${escapeHtml(property?.name || cleanNewsText(item.keyword) || "관심 자산")}</span>
         <strong>${escapeHtml(title)}</strong>
         <p>${escapeHtml(summary)}</p>
         <div class="muted">${escapeHtml(property?.name || "관심 지역")} · ${escapeHtml(cleanNewsText(item.source))} · ${escapeHtml(item.at)}</div>
       </article>
     `;
-  }).join("") : `<p>관심목록 또는 뉴스 키워드와 매칭된 뉴스가 없습니다.</p>`;
-}
-
-function getNewsKeywords() {
-  const configured = (state.settings.newsKeywords || "")
-    .split(",")
-    .map((keyword) => keyword.trim())
-    .filter(Boolean);
-  const activePropertyText = state.properties.map((property) => [
-    property.name,
-    property.region,
-    ...(property.tags || []),
-  ].join(" ")).join(" ");
-  const connectedConfigured = configured.filter((keyword) => (
-    activePropertyText.includes(keyword)
-    || state.properties.some((property) => property.region.includes(keyword) || property.name.includes(keyword))
-  ));
-  const propertyKeywords = state.properties.flatMap((property) => [
-    property.name,
-    property.region.split(" ").slice(-1)[0],
-    ...property.tags,
-  ]);
-  return [...new Set([...connectedConfigured, ...propertyKeywords].filter(Boolean))];
+  }).join("") : `<p>관심 자산과 매칭된 뉴스가 없습니다.</p>`;
 }
 
 function renderProperties() {
   const query = value("#watchSearch").toLowerCase();
   const grid = document.querySelector("#propertyGrid");
+  const pager = document.querySelector("#propertyPager");
   const properties = getInterestZoneProperties().filter((property) => {
-    const haystack = [property.name, property.region, property.type, ...property.tags].join(" ").toLowerCase();
+    const haystack = [property.name, property.region, property.type, ...(property.tags || [])].join(" ").toLowerCase();
     return haystack.includes(query);
   });
+  const pageSize = 6;
+  const pageCount = Math.max(1, Math.ceil(properties.length / pageSize));
+  propertyPage = Math.min(propertyPage, pageCount);
+  propertyPage = Math.max(propertyPage, 1);
+  const start = (propertyPage - 1) * pageSize;
+  const visibleProperties = properties.slice(start, start + pageSize);
 
-  grid.innerHTML = properties.map((property) => `
+  grid.innerHTML = visibleProperties.length ? visibleProperties.map((property) => `
     <article class="property-card">
-      <h3>${escapeHtml(property.name)}</h3>
-      <div class="card-meta">${escapeHtml(property.region)} · ${escapeHtml(property.type)} · ${property.baseArea || property.area}㎡ 기준</div>
-      <div class="price">${formatPrice(property.price)}</div>
-      <span class="badge ${property.change < 0 ? "amber" : property.change >= state.settings.alertThreshold ? "red" : ""}">
-        ${property.change > 0 ? "+" : ""}${property.change}% / 30일
-      </span>
+      <div class="property-card-head">
+        <div>
+          <h3>${escapeHtml(property.name)}</h3>
+          <div class="card-meta">${escapeHtml(property.region)} · ${escapeHtml(property.type)}</div>
+        </div>
+        <span class="badge">${escapeHtml(`${Math.round(Number(property.baseArea || property.area || 0)) || "-"}㎡`)}</span>
+      </div>
+      <div class="price">매매 시세 ${formatPrice(property.price)}</div>
+      <div class="card-status-row">
+        <span class="badge ${property.change < 0 ? "amber" : property.change >= state.settings.alertThreshold ? "red" : ""}">
+          ${property.change > 0 ? "+" : ""}${property.change}% / 30일
+        </span>
+        <button type="button" class="link-chip" data-evidence="${property.id}">${hasFitScore(property) ? `입지 ${formatFitScore(property)}` : "입지 근거"}</button>
+      </div>
       <p class="card-meta">최근 거래 ${escapeHtml(property.lastTradeDate || "미입력")} · ${property.lastTradeFloor || "-"}층 · ${property.buildYear || "-"}년식</p>
-      <p class="card-meta">매칭 평형 ${property.matchedTradeArea || property.baseArea || property.area || "-"}㎡</p>
-      <p class="card-meta">전월세 ${formatRent(property.rentDeposit, property.monthlyRent)}</p>
-      <p class="card-meta">${formatFitScore(property) ? `입지 ${formatFitScore(property)} · ` : ""}지하철 ${formatDistance(property.subwayDistance)}</p>
-      <p class="card-meta">${escapeHtml(property.tags.join(", ") || "태그 없음")}</p>
+      <p class="card-meta">전세/월세 ${formatRent(property.rentDeposit, property.monthlyRent)} · 지하철 ${formatDistance(property.subwayDistance)}</p>
+      <p class="card-meta">${escapeHtml(sanitizeTags(property.tags).join(", ") || "태그 없음")}</p>
       <p class="card-meta">${escapeHtml(property.risk || "리스크 메모 없음")}</p>
       <div class="card-actions">
         <button data-detail="${property.id}">상세</button>
@@ -1397,10 +1816,29 @@ function renderProperties() {
         <button data-delete="${property.id}">삭제</button>
       </div>
     </article>
-  `).join("");
+  `).join("") : `<p class="empty-state">조건에 맞는 관심 자산이 없습니다.</p>`;
+
+  if (pager) {
+    pager.innerHTML = `
+      <span>${properties.length ? `${start + 1}-${Math.min(start + pageSize, properties.length)} / ${properties.length}` : "0 / 0"}</span>
+      <div class="pager-controls">
+        <button type="button" ${propertyPage <= 1 ? "disabled" : ""} data-page-step="-1">이전</button>
+        <button type="button" ${propertyPage >= pageCount ? "disabled" : ""} data-page-step="1">다음</button>
+      </div>
+    `;
+    pager.querySelectorAll("[data-page-step]").forEach((button) => {
+      button.addEventListener("click", () => {
+        propertyPage = Math.min(pageCount, Math.max(1, propertyPage + Number(button.dataset.pageStep)));
+        renderProperties();
+      });
+    });
+  }
 
   grid.querySelectorAll("[data-detail]").forEach((button) => {
     button.addEventListener("click", () => openPropertyDetail(button.dataset.detail));
+  });
+  grid.querySelectorAll("[data-evidence]").forEach((button) => {
+    button.addEventListener("click", () => openPropertyEvidence(button.dataset.evidence));
   });
   grid.querySelectorAll("[data-edit]").forEach((button) => {
     button.addEventListener("click", () => editProperty(button.dataset.edit));
@@ -1412,7 +1850,14 @@ function renderProperties() {
 
 function renderVisits() {
   const list = document.querySelector("#visitList");
-  list.innerHTML = state.visits.length ? state.visits.map((visit) => {
+  const pager = document.querySelector("#visitPager");
+  const pageSize = 4;
+  const pageCount = Math.max(1, Math.ceil(state.visits.length / pageSize));
+  visitPage = Math.min(visitPage, pageCount);
+  visitPage = Math.max(visitPage, 1);
+  const start = (visitPage - 1) * pageSize;
+  const visibleVisits = state.visits.slice(start, start + pageSize);
+  list.innerHTML = visibleVisits.length ? visibleVisits.map((visit) => {
     const property = findProperty(visit.propertyId);
     const photos = Array.isArray(visit.photos) ? visit.photos.filter(Boolean) : [];
     return `
@@ -1432,11 +1877,27 @@ function renderVisits() {
         <span class="badge">임장</span>
       </div>
     `;
-  }).join("") : `<p>아직 저장된 임장 기록이 없습니다.</p>`;
+  }).join("") : `<p class="empty-state">아직 저장된 임장 기록이 없습니다.</p>`;
+
+  if (pager) {
+    pager.innerHTML = `
+      <span>${state.visits.length ? `${start + 1}-${Math.min(start + pageSize, state.visits.length)} / ${state.visits.length}` : "0 / 0"}</span>
+      <div class="pager-controls">
+        <button type="button" ${visitPage <= 1 ? "disabled" : ""} data-page-step="-1">이전</button>
+        <button type="button" ${visitPage >= pageCount ? "disabled" : ""} data-page-step="1">다음</button>
+      </div>
+    `;
+    pager.querySelectorAll("[data-page-step]").forEach((button) => {
+      button.addEventListener("click", () => {
+        visitPage = Math.min(pageCount, Math.max(1, visitPage + Number(button.dataset.pageStep)));
+        renderVisits();
+      });
+    });
+  }
 }
 
 function readVisitPhotos(files) {
-  return Promise.all(files.slice(0, 4).map((file) => resizeImageFile(file, 1280, 0.82))).then((items) => items.filter(Boolean));
+  return Promise.all(files.slice(0, 4).map((file) => resizeImageFile(file, 1200, 0.72))).then((items) => items.filter(Boolean));
 }
 
 function resizeImageFile(file, maxSize, quality) {
@@ -1452,6 +1913,11 @@ function resizeImageFile(file, maxSize, quality) {
         canvas.height = Math.max(1, Math.round(image.height * scale));
         const context = canvas.getContext("2d");
         context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        const webp = canvas.toDataURL("image/webp", quality);
+        if (webp.startsWith("data:image/webp")) {
+          resolve(webp);
+          return;
+        }
         resolve(canvas.toDataURL("image/jpeg", quality));
       };
       image.onerror = () => resolve("");
@@ -1464,7 +1930,8 @@ function resizeImageFile(file, maxSize, quality) {
 
 function renderAlerts() {
   const list = document.querySelector("#alertList");
-  list.innerHTML = state.alerts.length ? state.alerts.map((alert) => {
+  const unreadAlerts = state.alerts.filter((alert) => !alert.read);
+  list.innerHTML = unreadAlerts.length ? unreadAlerts.map((alert) => {
     const property = findProperty(alert.propertyId);
     return `
       <div class="alert ${alert.read ? "" : "unread"}">
@@ -1476,7 +1943,7 @@ function renderAlerts() {
         <span class="badge ${alert.read ? "" : "amber"}">${alert.read ? "읽음" : "미확인"}</span>
       </div>
     `;
-  }).join("") : `<p>알림이 없습니다.</p>`;
+  }).join("") : `<p>새 알림이 없습니다.</p>`;
 }
 
 function openPropertyDetail(id) {
@@ -1489,8 +1956,20 @@ function openPropertyDetail(id) {
   renderPropertyDetail();
 }
 
+function openPropertyEvidence(id) {
+  detailPropertyId = id;
+  const property = findProperty(id);
+  if (!property) return;
+  document.querySelector("#evidenceModal").hidden = false;
+  renderPropertyEvidence(property);
+}
+
 function closePropertyDetail() {
   document.querySelector("#detailModal").hidden = true;
+}
+
+function closePropertyEvidence() {
+  document.querySelector("#evidenceModal").hidden = true;
 }
 
 function renderPropertyDetail() {
@@ -1510,7 +1989,11 @@ function renderPropertyDetail() {
   };
 
   document.querySelector("#detailTitle").textContent = property.name;
-  document.querySelector("#detailMeta").textContent = `${property.region} · ${property.type} · ${property.baseArea || property.area}㎡ 기준`;
+  const detailMeta = document.querySelector("#detailMeta");
+  const hasEvidence = hasFitScore(property) || property.locationEvidence || property.locationScore || property.gbR001;
+  detailMeta.innerHTML = `${escapeHtml(property.region)} · ${escapeHtml(property.type)}${hasFitScore(property) ? ` · 입지 ${formatScore(property.fitScore)}` : ""}`;
+  const trigger = document.querySelector("#detailEvidenceTrigger");
+  if (trigger) trigger.hidden = !hasEvidence;
 
   const filteredTradeSeries = filterSeriesByArea(tradeHistory, detailSelectedArea);
   const filteredRentSeries = filterSeriesByArea(rentHistory, detailSelectedArea);
@@ -1525,6 +2008,51 @@ function renderPropertyDetail() {
 
   document.querySelector("#detailRows").innerHTML = renderDetailRows(filteredTradeSeries, filteredRentSeries);
   renderDetailChart(filteredTradeSeries, filteredRentSeries);
+}
+
+function renderPropertyEvidence(property) {
+  const evidence = document.querySelector("#evidenceBody");
+  if (!evidence) return;
+  const evidenceModel = property.locationEvidence || property.gbR001 || property.locationScore || null;
+  if (!evidenceModel) {
+    evidence.innerHTML = `<p class="empty-state">입지 근거가 없습니다.</p>`;
+    document.querySelector("#evidenceTitle").textContent = property.name;
+    document.querySelector("#evidenceMeta").textContent = `${property.region} · ${property.type}`;
+    return;
+  }
+  const score = evidenceModel?.metrics || property.locationScore || property.gbR001 || {};
+  const sourceLabel = describeLocationScoreSource(evidenceModel || score);
+  const featurePoint = Array.isArray(evidenceModel?.feature?.centroid) && evidenceModel.feature.centroid.length >= 2
+    ? `${Number(evidenceModel.feature.centroid[1]).toFixed(5)}, ${Number(evidenceModel.feature.centroid[0]).toFixed(5)}`
+    : "미입력";
+  const propertyPoint = evidenceModel?.property?.lat && evidenceModel?.property?.lng
+    ? `${Number(evidenceModel.property.lat).toFixed(5)}, ${Number(evidenceModel.property.lng).toFixed(5)}`
+    : (property.lat && property.lng
+    ? `${Number(property.lat).toFixed(5)}, ${Number(property.lng).toFixed(5)}`
+    : "미입력");
+  document.querySelector("#evidenceTitle").textContent = property.name;
+  document.querySelector("#evidenceMeta").textContent = `${property.region} · ${property.type}`;
+  evidence.innerHTML = `
+    <div class="detail-evidence-head">
+      <strong>입지 근거</strong>
+      <span>${escapeHtml(sourceLabel)}</span>
+    </div>
+      <div class="detail-evidence-grid">
+        <div><small>모델 버전</small><strong>${escapeHtml(String(evidenceModel?.modelVersion || 1))}</strong></div>
+        <div><small>종합 점수</small><strong>${escapeHtml(Number.isFinite(Number(score.score)) ? formatScore(score.score) : "미입력")}</strong></div>
+        <div><small>기준 점수</small><strong>${escapeHtml(Number.isFinite(Number(score.baseScore)) ? formatScore(score.baseScore) : "미입력")}</strong></div>
+        <div><small>근접 보정</small><strong>${escapeHtml(Number.isFinite(Number(score.proximityScore)) ? formatScore(score.proximityScore) : "미입력")}</strong></div>
+        <div><small>출처</small><strong>${escapeHtml(sourceLabel)}</strong></div>
+        <div><small>매칭 방식</small><strong>${escapeHtml(evidenceModel?.matchMode || score.matchMode || "미입력")}</strong></div>
+        <div><small>근거 키</small><strong>${escapeHtml(evidenceModel?.featureKey || score.featureKey || "미입력")}</strong></div>
+        <div><small>자산 좌표</small><strong>${escapeHtml(propertyPoint)}</strong></div>
+        <div><small>근거 좌표</small><strong>${escapeHtml(featurePoint)}</strong></div>
+        <div><small>근거 거리</small><strong>${escapeHtml(Number.isFinite(Number(score.distanceToFeatureMeters)) ? `${Math.round(Number(score.distanceToFeatureMeters)).toLocaleString()}m` : "미입력")}</strong></div>
+        <div><small>지하철 거리</small><strong>${escapeHtml(formatDistance(score.subwayDistance || property.subwayDistance))}</strong></div>
+        <div><small>경찰 거리</small><strong>${escapeHtml(score.policeDistance ? `${Math.round(score.policeDistance)}m` : "미입력")}</strong></div>
+        <div><small>대학 거리</small><strong>${escapeHtml(score.universityDistance ? `${Math.round(score.universityDistance)}m` : "미입력")}</strong></div>
+      </div>
+  `;
 }
 
 function statCard(label, value) {
@@ -1552,7 +2080,6 @@ function renderDetailRows(tradeSeries, rentSeries) {
     return `
       <tr>
         <td>${escapeHtml(month)}</td>
-        <td>${escapeHtml(detailSelectedArea || "-")}㎡</td>
         <td>${trade ? formatPrice(trade.price) : "미입력"}</td>
         <td>${rent ? formatRent(rent.deposit, rent.monthlyRent) : "미입력"}</td>
         <td>${trade?.floor || rent?.floor || "-"}</td>
@@ -1604,9 +2131,45 @@ function renderDetailChart(tradeSeries, rentSeries) {
 
 function renderAdminOptions() {
   const select = document.querySelector("#visitProperty");
+  if (!select) return;
   select.innerHTML = state.properties.map((property) => (
     `<option value="${property.id}">${escapeHtml(property.name)}</option>`
   )).join("");
+}
+
+function renderTopActions(view = getActiveView()) {
+  const adminButton = document.querySelector("#adminOpenButton");
+  const topActions = document.querySelector(".top-actions");
+  if (!topActions) return;
+  if (adminButton) adminButton.hidden = view !== "dashboard";
+  topActions.hidden = view !== "dashboard" || !adminButton || adminButton.hidden;
+  if (!topActions.querySelector("#adminOpenButton")) {
+    topActions.innerHTML = `<button class="primary" id="adminOpenButton" data-view-jump="admin">정보 입력</button>`;
+    document.querySelector("#adminOpenButton")?.addEventListener("click", () => setView("admin"));
+  }
+}
+
+function renderHostTabs() {
+  const tabs = document.querySelector("#hostTabs");
+  if (!tabs) return;
+  if (!hostMode) {
+    tabs.innerHTML = "";
+    tabs.hidden = true;
+    return;
+  }
+  tabs.hidden = false;
+  tabs.innerHTML = Object.entries(views).map(([key, view]) => `
+    <button class="host-tab ${getActiveView() === key ? "active" : ""}" data-view="${key}">
+      ${escapeHtml(view.title)}
+    </button>
+  `).join("");
+  tabs.querySelectorAll("[data-view]").forEach((button) => {
+    button.addEventListener("click", () => setView(button.dataset.view));
+  });
+}
+
+function getActiveView() {
+  return document.querySelector(".nav-item.active")?.dataset.view || "dashboard";
 }
 
 function editProperty(id) {
@@ -1624,7 +2187,7 @@ function editProperty(id) {
   document.querySelector("#propertySubwayDistance").value = property.subwayDistance || "";
   document.querySelector("#propertyLat").value = property.lat || "";
   document.querySelector("#propertyLng").value = property.lng || "";
-  document.querySelector("#propertyTags").value = property.tags.join(", ");
+  document.querySelector("#propertyTags").value = (property.tags || []).join(", ");
   document.querySelector("#propertyRisk").value = property.risk;
   setView("admin");
 }
@@ -1654,64 +2217,246 @@ function requireAdmin(message) {
 async function runMonitor() {
   const requestId = ++newsRequestSeq;
   state.newsLoading = true;
-  render();
-  const lawdCodes = getMonitorLawdCodes();
-  const dealMonth = state.settings.dealMonth || new Date().toISOString().slice(0, 7).replace("-", "");
-  const dealMonths = getRecentDealMonths(dealMonth, 12);
-  const trades = await fetchMolitSeries("trade", lawdCodes, dealMonths);
-  const rents = await fetchMolitSeries("rent", lawdCodes, dealMonths);
-  const baseChanged = await enrichLocationSignals();
-  applyMolitRecords(trades, rents);
-  updatePropertyHistories(trades, rents);
+  try {
+    setMonitorState({
+      active: true,
+      status: "running",
+      phase: "조회 준비",
+      detail: "관심 자산, 법정동 코드, 조회 범위를 확인하는 중입니다.",
+      progress: 5,
+    });
+    render();
+    await pause(0);
+    const lawdCodes = getMonitorLawdCodes();
+    const dealMonth = state.settings.dealMonth || new Date().toISOString().slice(0, 7).replace("-", "");
+    const dealMonths = getRecentDealMonths(dealMonth, 12);
+    setMonitorState({
+      phase: "국토부 매매 조회",
+      detail: `${lawdCodes.join(", ")} · 최근 ${dealMonths.length}개월`,
+      progress: 18,
+    });
+    await pause(0);
+    const trades = await fetchMolitSeries("trade", lawdCodes, dealMonths);
+    setMonitorState({
+      phase: "국토부 전월세 조회",
+      detail: `${lawdCodes.join(", ")} · 최근 ${dealMonths.length}개월`,
+      progress: 42,
+    });
+    await pause(0);
+    const rents = await fetchMolitSeries("rent", lawdCodes, dealMonths);
+    setMonitorState({
+      phase: "입지/좌표 보강",
+      detail: "지하철 거리와 입지 점수를 확인하는 중입니다.",
+      progress: 63,
+    });
+    await pause(0);
+    const baseChanged = await enrichLocationSignals();
+    applyMolitRecords(trades, rents);
+    updatePropertyHistories(trades, rents);
 
-  const missingProperties = state.properties.filter((property) => property.tags?.includes("관심단지") && needsMarketBackfill(property));
-  let allTrades = trades;
-  let allRents = rents;
-  let deepChanged = false;
-  if (missingProperties.length) {
-    const extraMonths = getRecentDealMonths(dealMonth, 84).slice(12);
-    const extraTrades = await fetchMolitSeries("trade", lawdCodes, extraMonths);
-    const extraRents = await fetchMolitSeries("rent", lawdCodes, extraMonths);
-    allTrades = [...trades, ...extraTrades];
-    allRents = [...rents, ...extraRents];
-    applyMolitRecords(allTrades, allRents);
-    updatePropertyHistories(allTrades, allRents);
-    deepChanged = true;
-  }
-  const first = state.properties[0];
-  const fetchedNews = await collectNewsItems();
-  if (requestId !== newsRequestSeq) return;
-  if (fetchedNews.length) {
-    state.news = filterActiveNews(mergeNewsItems(fetchedNews, state.news.filter((item) => !isSampleNews(item)))).slice(0, 30);
-  } else if (first) {
-    state.news = filterActiveNews(state.news.filter((item) => !isSampleNews(item))).slice(0, 30);
-  }
-  if (first) {
-    const latest = fetchedNews[0] || state.news[0];
-    if (latest) {
-      createAlert(first.id, "news", "관심 키워드 뉴스 감지", `${latest.keyword} 관련 뉴스가 추가되었습니다.`);
-      addTimeline(first.id, "뉴스", `${latest.keyword} 키워드 뉴스가 수집되었습니다.`);
+    const missingProperties = state.properties.filter((property) => property.tags?.includes("관심단지") && needsMarketBackfill(property));
+    let allTrades = trades;
+    let allRents = rents;
+    let deepChanged = false;
+    if (missingProperties.length) {
+      const extraMonths = getRecentDealMonths(dealMonth, 84).slice(12);
+      setMonitorState({
+        phase: "보강 조회",
+        detail: `미입력 단지 ${missingProperties.length}개를 추가로 확인하는 중입니다.`,
+        progress: 76,
+      });
+      await pause(0);
+      const extraTrades = await fetchMolitSeries("trade", lawdCodes, extraMonths);
+      const extraRents = await fetchMolitSeries("rent", lawdCodes, extraMonths);
+      allTrades = [...trades, ...extraTrades];
+      allRents = [...rents, ...extraRents];
+      applyMolitRecords(allTrades, allRents);
+      updatePropertyHistories(allTrades, allRents);
+      deepChanged = true;
     }
-    addTimeline(first.id, "국토부", `${lawdCodes.join(", ")} 최근 ${dealMonths.length}개월 매매 ${trades.length}건, 전월세 ${rents.length}건을 조회했습니다.`);
-    addTimeline(first.id, "VWorld", `${state.settings.lawdCode || "시군구"} 시군구 경계 레이어 기준으로 지도 영역을 갱신했습니다.`);
+    const first = state.properties[0];
+    setMonitorState({
+      phase: "뉴스 수집",
+      detail: "관심 자산만 모아서 정리하는 중입니다.",
+      progress: 88,
+    });
+    await pause(0);
+    const fetchedNews = await collectNewsItems();
+    setMacroState({ loading: true });
+    renderMacro();
+    const macroSignals = await collectMacroSignals();
+    if (requestId !== newsRequestSeq) return;
+    if (fetchedNews.length) {
+      state.news = filterActiveNews(mergeNewsItems(fetchedNews, state.news.filter((item) => !isSampleNews(item)))).slice(0, 30);
+    } else if (first) {
+      state.news = filterActiveNews(state.news.filter((item) => !isSampleNews(item))).slice(0, 30);
+    }
+    state.macro = {
+      ...(state.macro || defaultState.macro),
+      loading: false,
+      lastRunAt: new Date().toLocaleString("ko-KR", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+      fx: macroSignals.fx,
+      signals: macroSignals.signals,
+    };
+    pruneEphemeralCollections(state);
+    if (first) {
+      const latest = fetchedNews[0] || state.news[0];
+      if (latest) {
+        createAlert(first.id, "news", "관심 자산 뉴스 감지", `${latest.keyword} 관련 뉴스가 추가되었습니다.`);
+        addTimeline(first.id, "뉴스", `${latest.keyword} 자산 뉴스가 수집되었습니다.`);
+      }
+      addTimeline(first.id, "국토부", `${lawdCodes.join(", ")} 최근 ${dealMonths.length}개월 매매 ${trades.length}건, 전월세 ${rents.length}건을 조회했습니다.`);
+      addTimeline(first.id, "VWorld", `${state.settings.lawdCode || "시군구"} 시군구 경계 레이어 기준으로 지도 영역을 갱신했습니다.`);
+      if (macroSignals.fx?.value) {
+        addTimeline(first.id, "거시", `${macroSignals.fx.label} ${macroSignals.fx.value} · ${macroSignals.fx.source}`);
+      }
+    }
+    state.monitorSummary = {
+      tradeCount: allTrades.length,
+      rentCount: allRents.length,
+      matchedCount: state.properties.filter((property) => property.price || property.lastTradeDate || property.rentDeposit || property.monthlyRent).length,
+      backfillCount: missingProperties.length,
+      lastRunAt: new Date().toLocaleString("ko-KR", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+    };
+    state.newsLoading = false;
+    setMonitorState({
+      active: false,
+      status: "done",
+      phase: "완료",
+      detail: `${allTrades.length}건 매매 · ${allRents.length}건 전월세 · ${fetchedNews.length}건 뉴스 · ${macroSignals.signals.length}건 거시 신호`,
+      progress: 100,
+      lastRunAt: state.monitorSummary.lastRunAt,
+    });
+    saveState();
+    render();
+    if (baseChanged || deepChanged) render({ skipMap: true });
+  } catch (error) {
+    state.newsLoading = false;
+    state.macro = {
+      ...(state.macro || defaultState.macro),
+      loading: false,
+    };
+    setMonitorState({
+      active: false,
+      status: "error",
+      phase: "실패",
+      detail: error?.message || "모니터링 중 오류가 발생했습니다.",
+      progress: 100,
+      lastRunAt: new Date().toLocaleString("ko-KR", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+    });
+    saveState();
+    render();
   }
-  state.monitorSummary = {
-    tradeCount: allTrades.length,
-    rentCount: allRents.length,
-    matchedCount: state.properties.filter((property) => property.price || property.lastTradeDate || property.rentDeposit || property.monthlyRent).length,
-    backfillCount: missingProperties.length,
-    lastRunAt: new Date().toLocaleString("ko-KR", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    }),
-  };
-  state.newsLoading = false;
-  saveState();
+}
+
+async function runSignalBatch() {
+  if (state.monitoring?.active) return;
+  const requestId = ++newsRequestSeq;
+  state.newsLoading = true;
+  setMacroState({ loading: true });
+  setMonitorState({
+    active: true,
+    status: "running",
+    phase: "배치 수집",
+    detail: "관심 자산 뉴스와 거시 변수를 갱신하는 중입니다.",
+    progress: 90,
+  });
   render();
-  if (baseChanged || deepChanged) render({ skipMap: true });
+
+  try {
+    const fetchedNews = await collectNewsItems();
+    const macroSignals = await collectMacroSignals();
+    if (requestId !== newsRequestSeq) return;
+
+    if (fetchedNews.length) {
+      const existing = state.news.filter((item) => !isSampleNews(item));
+      state.news = filterActiveNews(mergeNewsItems(fetchedNews, existing)).slice(0, 30);
+    }
+
+    state.macro = {
+      ...(state.macro || defaultState.macro),
+      loading: false,
+      lastRunAt: new Date().toLocaleString("ko-KR", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+      fx: macroSignals.fx,
+      signals: macroSignals.signals,
+    };
+    pruneEphemeralCollections(state);
+    state.newsLoading = false;
+    setMonitorState({
+      active: false,
+      status: "done",
+      phase: "완료",
+      detail: `${fetchedNews.length}건 뉴스 · ${macroSignals.signals.length}건 거시 신호`,
+      progress: 100,
+      lastRunAt: state.macro.lastRunAt,
+    });
+    saveState();
+    render();
+  } catch (error) {
+    state.newsLoading = false;
+    state.macro = {
+      ...(state.macro || defaultState.macro),
+      loading: false,
+    };
+    setMonitorState({
+      active: false,
+      status: "error",
+      phase: "실패",
+      detail: error?.message || "배치 수집 중 오류가 발생했습니다.",
+      progress: 100,
+      lastRunAt: new Date().toLocaleString("ko-KR", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+    });
+    saveState();
+    render();
+  }
+}
+
+function setMonitorState(partial) {
+  state.monitoring = {
+    ...(state.monitoring || defaultState.monitoring),
+    ...partial,
+  };
+}
+
+function setMacroState(partial) {
+  state.macro = {
+    ...(state.macro || defaultState.macro),
+    ...partial,
+  };
+}
+
+function pause(ms = 0) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function needsMarketBackfill(property) {
@@ -1752,23 +2497,42 @@ async function enrichLocationSignals() {
         changed = true;
       }
     }
-    if (!property.fitScore) {
-      const score = await getLocationScore(property);
-      if (score?.score) {
-        property.fitScore = score.score;
-        property.fitScoreSource = score.source;
-        if (score.subwayDistance && !property.subwayDistance) property.subwayDistance = score.subwayDistance;
-        property.locationScore = score;
-        changed = true;
-      } else if (!property.fitScoreSource) {
-        property.fitScoreSource = score?.source || "unsupported";
-        changed = true;
+    const needsEvidence = !property.locationEvidence
+      || Number(property.locationEvidence.modelVersion || 0) < 2
+      || !property.fitScoreSource
+      || !property.locationScore;
+    if (!needsEvidence) return;
+    const score = await getLocationScore(property);
+    if (score?.datasetId) {
+    const evidence = buildLocationEvidence(property, score);
+      if (!Number.isFinite(Number(property.fitScore)) || Number(property.fitScore) <= 0) {
+        property.fitScore = evidence.metrics.score;
       }
+      property.fitScoreSource = evidence.source;
+      if (evidence.metrics.subwayDistance && !property.subwayDistance) property.subwayDistance = evidence.metrics.subwayDistance;
+      property.locationScore = evidence.metrics;
+      property.locationEvidence = evidence;
+      if (evidence.datasetId === "gb_r001") property.gbR001 = evidence;
+      changed = true;
     } else if (!property.fitScoreSource) {
-      property.fitScoreSource = (await getLocationScore(property))?.source || "unsupported";
+      property.fitScoreSource = score?.source || "unsupported";
       changed = true;
     }
   }));
+  if (changed) saveState();
+  return changed;
+}
+
+async function rebuildLocationScores() {
+  let changed = false;
+  for (const property of state.properties) {
+    if (!property.lat || !property.lng) continue;
+    const applied = await applyLocationScore(property, {
+      preserveFitScore: false,
+      preserveSubwayDistance: false,
+    });
+    changed = changed || applied;
+  }
   if (changed) saveState();
   return changed;
 }
@@ -1789,15 +2553,17 @@ function findNearestSubway(property) {
 
 async function applyLocationScore(property, options = {}) {
   const score = await getLocationScore(property);
-  if (!score?.score) {
+  if (!score?.datasetId) {
     property.fitScoreSource = score?.source || "unsupported";
     return false;
   }
-  if (!options.preserveFitScore) property.fitScore = score.score;
-  if (!options.preserveSubwayDistance && score.subwayDistance) property.subwayDistance = score.subwayDistance;
-  property.fitScoreSource = score.source;
-  property.locationScore = score;
-  if (score.datasetId === "gb_r001") property.gbR001 = score;
+  const evidence = buildLocationEvidence(property, score);
+  if (!options.preserveFitScore || !Number.isFinite(Number(property.fitScore)) || Number(property.fitScore) <= 0) property.fitScore = evidence.metrics.score;
+  if (!options.preserveSubwayDistance && evidence.metrics.subwayDistance) property.subwayDistance = evidence.metrics.subwayDistance;
+  property.fitScoreSource = evidence.source;
+  property.locationScore = evidence.metrics;
+  property.locationEvidence = evidence;
+  if (evidence.datasetId === "gb_r001") property.gbR001 = evidence;
   return true;
 }
 
@@ -1806,27 +2572,44 @@ async function getLocationScore(property) {
   const datasets = await loadLocationScoreDatasets();
   if (!datasets.length) return { score: 0, source: "location-score-unavailable" };
 
+  let fallbackScore = null;
   for (const dataset of datasets) {
     const [minLng, minLat, maxLng, maxLat] = dataset.bbox || [];
-    if (!pointInBbox(property.lng, property.lat, [minLng, minLat, maxLng, maxLat])) continue;
     const score = scoreFromLocationDataset(property, dataset);
-    if (score?.score) return score;
+    if (!score) continue;
+    if (pointInBbox(property.lng, property.lat, [minLng, minLat, maxLng, maxLat]) && score.score) return score;
+    if (!fallbackScore && score.score !== undefined) fallbackScore = { ...score, source: `${dataset.id}:proxy` };
   }
-  return { score: 0, source: "unsupported" };
+  return fallbackScore || { score: 0, source: "unsupported" };
 }
 
 function scoreFromLocationDataset(property, dataset) {
   const candidates = dataset.features.filter((feature) => pointInBbox(property.lng, property.lat, feature.bbox));
   const matched = candidates.find((feature) => feature.rings?.some((ring) => pointInRing(property.lng, property.lat, ring)));
-  const feature = matched || nearestFeature(property.lng, property.lat, candidates);
+  const feature = matched || nearestFeature(property.lng, property.lat, candidates.length ? candidates : dataset.features);
   if (!feature) return null;
   const metrics = feature.metrics || {};
+  const featureKey = featureKeyFor(feature);
+  const centroid = Array.isArray(feature.centroid) && feature.centroid.length >= 2 ? feature.centroid : null;
+  const distanceKmToFeature = centroid ? distanceKm(property.lat, property.lng, Number(centroid[1]), Number(centroid[0])) : 0;
+  const proximityScore = Math.max(0, 10 - Math.min(10, distanceKmToFeature * 2));
+  const baseScore = Number(metrics.totalScore || 0);
+  const finalScore = Number(Math.max(0, Math.min(10, (baseScore * 0.8) + (proximityScore * 0.2))).toFixed(1));
   return {
     source: matched ? `${dataset.id}:polygon` : `${dataset.id}:nearest`,
     datasetId: dataset.id,
     datasetName: dataset.name,
     region: dataset.region || "",
-    score: Number(metrics.totalScore || 0),
+    matchMode: matched ? "polygon" : "nearest",
+    featureKey,
+    propertyLat: Number(property.lat || 0),
+    propertyLng: Number(property.lng || 0),
+    featureCentroid: feature.centroid || [],
+    featureBBox: feature.bbox || [],
+    score: finalScore,
+    baseScore,
+    proximityScore: Number(proximityScore.toFixed(1)),
+    distanceToFeatureMeters: Number((distanceKmToFeature * 1000).toFixed(0)),
     subwayDistance: Number(metrics.subwayDistance || 0),
     usageScore: Number(metrics.usageScore || 0),
     policeDistance: Number(metrics.policeDistance || 0),
@@ -1834,6 +2617,52 @@ function scoreFromLocationDataset(property, dataset) {
     policeScore: Number(metrics.policeScore || 0),
     universityScore: Number(metrics.universityScore || 0),
   };
+}
+
+function hasFitScore(property) {
+  return Number.isFinite(Number(property?.fitScore));
+}
+
+function buildLocationEvidence(property, score) {
+  const source = String(score?.source || score?.datasetId || score?.datasetName || "unsupported");
+  return {
+    modelVersion: 4,
+    source,
+    datasetId: score?.datasetId || "unknown",
+    datasetName: score?.datasetName || "미입력",
+    region: score?.region || property?.region || "",
+    matchMode: score?.matchMode || "unknown",
+    featureKey: score?.featureKey || "",
+    property: {
+      id: property?.id || "",
+      name: property?.name || "",
+      region: property?.region || "",
+      lat: Number(property?.lat || 0),
+      lng: Number(property?.lng || 0),
+    },
+    feature: {
+      bbox: score?.featureBBox || [],
+      centroid: score?.featureCentroid || [],
+    },
+    metrics: {
+      score: Number(score?.score || 0),
+      baseScore: Number(score?.baseScore || 0),
+      proximityScore: Number(score?.proximityScore || 0),
+      distanceToFeatureMeters: Number(score?.distanceToFeatureMeters || 0),
+      subwayDistance: Number(score?.subwayDistance || 0),
+      usageScore: Number(score?.usageScore || 0),
+      policeDistance: Number(score?.policeDistance || 0),
+      universityDistance: Number(score?.universityDistance || 0),
+      policeScore: Number(score?.policeScore || 0),
+      universityScore: Number(score?.universityScore || 0),
+    },
+  };
+}
+
+function featureKeyFor(feature) {
+  const centroid = Array.isArray(feature?.centroid) ? feature.centroid.map((value) => Number(value || 0).toFixed(6)).join(",") : "";
+  const bbox = Array.isArray(feature?.bbox) ? feature.bbox.map((value) => Number(value || 0).toFixed(6)).join(",") : "";
+  return [bbox, centroid].filter(Boolean).join("|");
 }
 
 async function loadLocationScoreDatasets() {
@@ -1934,6 +2763,7 @@ function parseMolitXml(xmlText, type) {
 
 function normalizeTradeRecord(record) {
   const [year, month, day] = extractMolitDate(record);
+  const dateKey = buildMolitDateKey(year, month, day);
   return {
     aptName: record.aptNm || record.아파트 || record.아파트명 || record.단지명 || record.aptName || record.단지 || "",
     umdName: record.umdNm || record.법정동 || record.법정동읍면동 || record.읍면동 || "",
@@ -1942,14 +2772,15 @@ function normalizeTradeRecord(record) {
     area: Number(record.excluUseAr || record.전용면적 || record["전용면적_㎡"] || 0),
     floor: Number(record.floor || record.층 || record.동 || 0),
     buildYear: Number(record.buildYear || record.건축년도 || record.준공년도 || 0),
-    date: formatDealDate(year, month, day) || String(record.계약년월 || "").replace(/^(\d{4})(\d{2})$/, "$1-$2"),
-    dateKey: Number(`${year || 0}${String(month || 0).padStart(2, "0")}${String(day || 0).padStart(2, "0")}`),
+    date: formatDealDate(year, month, day) || formatMolitMonthLabel(year, month),
+    dateKey,
     raw: record,
   };
 }
 
 function normalizeRentRecord(record) {
   const [year, month, day] = extractMolitDate(record);
+  const dateKey = buildMolitDateKey(year, month, day);
   return {
     aptName: record.aptNm || record.아파트 || record.아파트명 || record.단지명 || record.aptName || record.단지 || "",
     umdName: record.umdNm || record.법정동 || record.법정동읍면동 || record.읍면동 || "",
@@ -1958,16 +2789,17 @@ function normalizeRentRecord(record) {
     monthlyRent: parseAmount(record.monthlyRent || record.월세금액 || record.월세 || record.monthlyRentAmount),
     area: Number(record.excluUseAr || record.전용면적 || record["전용면적_㎡"] || 0),
     floor: Number(record.floor || record.층 || record.동 || 0),
-    date: formatDealDate(year, month, day) || String(record.계약년월 || "").replace(/^(\d{4})(\d{2})$/, "$1-$2"),
-    dateKey: Number(`${year || 0}${String(month || 0).padStart(2, "0")}${String(day || 0).padStart(2, "0")}`),
+    date: formatDealDate(year, month, day) || formatMolitMonthLabel(year, month),
+    dateKey,
     raw: record,
   };
 }
 
 function applyMolitRecords(trades, rents) {
   state.properties = state.properties.map((property) => {
-    const trade = findBestMolitMatch(property, trades);
-    const rent = findBestMolitMatch(property, rents);
+    const targetArea = Number(property.baseArea || property.area || 0);
+    const trade = findBestMolitMatch(property, trades, { targetArea, areaTolerance: 3 });
+    const rent = findBestMolitMatch(property, rents, { targetArea, areaTolerance: 3 });
     const updated = { ...property };
     if (trade?.amount) {
       const previous = Number(property.price || 0);
@@ -2004,7 +2836,11 @@ function updatePropertyHistories(trades, rents) {
 
 function buildMonthlySeries(property, records, kind) {
   const grouped = new Map();
+  const targetArea = Number(property.baseArea || property.area || 0);
+  const hasIdentity = [property.name, ...(property.aliases || [])].map(normalizeText).filter(Boolean).length > 0;
   records.forEach((record) => {
+    if (targetArea && !isAreaCompatible(record.area, targetArea, 3)) return;
+    if (hasIdentity && !isStrongMolitNameMatch(property, record)) return;
     const score = scoreMolitMatch(property, record);
     if (score <= 0) return;
     const month = String(record.date || "").slice(0, 7);
@@ -2033,32 +2869,56 @@ function buildMonthlySeries(property, records, kind) {
     });
 }
 
-function findBestMolitMatch(property, records) {
-  return records
+function findBestMolitMatch(property, records, options = {}) {
+  const targetArea = Number(options.targetArea || property.baseArea || property.area || 0);
+  const areaTolerance = Number.isFinite(Number(options.areaTolerance)) ? Number(options.areaTolerance) : 3;
+  const hasIdentity = [property.name, ...(property.aliases || [])].map(normalizeText).filter(Boolean).length > 0;
+  const filtered = targetArea
+    ? records.filter((record) => isAreaCompatible(record.area, targetArea, areaTolerance))
+    : records;
+  const namedMatches = filtered.filter((record) => isStrongMolitNameMatch(property, record));
+  const pool = namedMatches.length ? namedMatches : (hasIdentity ? [] : filtered);
+  return pool
     .map((record) => ({ record, score: scoreMolitMatch(property, record) }))
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score || (b.record.dateKey || 0) - (a.record.dateKey || 0))
     .map((item) => item.record)[0];
 }
 
+function isStrongMolitNameMatch(property, record) {
+  const targetNames = [property.name, ...(property.aliases || [])].map(normalizeText).filter(Boolean);
+  const apt = normalizeText(record.aptName);
+  if (!apt || apt.length < 3) return false;
+  return targetNames.some((target) => target === apt || target.includes(apt) || apt.includes(target));
+}
+
 function scoreMolitMatch(property, record) {
   const targetNames = [property.name, ...(property.aliases || [])].map(normalizeText).filter(Boolean);
+  const strongTargets = targetNames.filter((target) => target.length >= 3);
   const apt = normalizeText(record.aptName);
   const regionText = [property.region, ...(property.expectedDistricts || [])].join(" ");
   let score = 0;
 
   if (!apt) return 0;
   if (targetNames.some((target) => target === apt)) score += 100;
-  if (targetNames.some((target) => target.includes(apt) || apt.includes(target))) score += 60;
+  if (strongTargets.some((target) => target.includes(apt) || apt.includes(target))) score += 60;
   if (record.umdName && regionText.includes(record.umdName)) score += 30;
   if (record.sggCode === "41131" && regionText.includes("수정구")) score += 20;
   if (record.sggCode === "41133" && regionText.includes("중원구")) score += 20;
   score += scoreAreaMatch(property, record);
 
-  if (apt === "현대" && !regionText.includes(record.umdName || "")) score -= 80;
-  if (apt === "미도" && !regionText.includes(record.umdName || "")) score -= 80;
+  if (apt.length <= 2 && !record.umdName) score -= 35;
+  if (apt.length <= 2 && !record.sggCode) score -= 20;
+  if (targetNames.length && !targetNames.some((target) => target === apt) && !isAreaCompatible(record.area, Number(property.baseArea || property.area || 0), 3)) score -= 20;
   if (score > 0) return score;
   return scoreMolitFallback(property, record);
+}
+
+function isAreaCompatible(recordArea, targetArea, tolerance = 3) {
+  const target = Number(targetArea || 0);
+  const area = Number(recordArea || 0);
+  if (!target || !area) return true;
+  return Math.abs(area - target) <= tolerance;
 }
 
 function scoreMolitFallback(property, record) {
@@ -2105,39 +2965,185 @@ function onlyDigits(value) {
 }
 
 function extractMolitDate(record) {
-  const year = Number(record.dealYear || record.년 || record.contractYear || 0);
-  const month = Number(record.dealMonth || record.월 || record.contractMonth || 0);
-  const day = Number(record.dealDay || record.일 || record.contractDay || 0);
+  const compact = onlyDigits(record.dealYmd || record.계약년월일 || record.contractYmd || "");
+  const year = Number(
+    record.dealYear
+    || record.년
+    || record.contractYear
+    || (compact.length >= 4 ? compact.slice(0, 4) : 0)
+  );
+  const month = Number(
+    record.dealMonth
+    || record.계약월
+    || record.월
+    || record.contractMonth
+    || (compact.length >= 6 ? compact.slice(4, 6) : (record.계약년월 ? String(record.계약년월).slice(4, 6) : 0))
+  );
+  const day = Number(
+    record.dealDay
+    || record.계약일
+    || record.일
+    || record.contractDay
+    || (compact.length >= 8 ? compact.slice(6, 8) : 0)
+  );
   return [year, month, day];
 }
 
 function formatDealDate(year, month, day) {
-  if (!year || !month || !day) return "";
+  if (!year || !month) return "";
+  if (!day) return `${year}-${String(month).padStart(2, "0")}`;
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
-function createKeywordNews(property) {
-  const keyword = getNewsKeywords()[0] || property.region;
+function formatMolitMonthLabel(year, month) {
+  if (!year || !month) return "";
+  return `${year}-${String(month).padStart(2, "0")}`;
+}
+
+function buildMolitDateKey(year, month, day) {
+  if (!year || !month) return 0;
+  const normalizedDay = day || 0;
+  return Number(`${year}${String(month).padStart(2, "0")}${String(normalizedDay).padStart(2, "0")}`);
+}
+
+function createPropertyNews(property) {
+  const keyword = property.name || property.region;
   return {
     id: `n-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     propertyId: property.id,
     keyword,
-    title: `${keyword} 관련 부동산 흐름 업데이트`,
-    summary: `${property.name} 관심목록과 연결된 키워드입니다. 실거래, 전월세, 개발 이슈를 함께 확인하세요.`,
-    source: "키워드 모니터",
+    title: `${property.name} 관련 부동산 흐름 업데이트`,
+    summary: `${property.name} 관심 자산과 연결된 뉴스입니다. 실거래, 전월세, 개발 이슈를 함께 확인하세요.`,
+    source: "자산 모니터",
     at: new Date().toISOString().slice(0, 10),
   };
+}
+
+function getNewsTargets() {
+  return getInterestZoneProperties()
+    .map((property) => ({
+      property,
+      keyword: property.name || property.region || property.tags?.[0] || "",
+    }))
+    .filter(({ property, keyword }) => Boolean(property?.id && keyword))
+    .slice(0, 6);
+}
+
+async function collectMacroSignals() {
+  const specs = [
+    {
+      label: "정책",
+      keyword: "부동산 정책",
+      keywords: ["주택공급", "대출규제", "재건축", "청약"],
+      titlePrefix: "부동산 정책",
+    },
+    {
+      label: "주택",
+      keyword: "주택 공급",
+      keywords: ["공급", "분양", "입주", "청약"],
+      titlePrefix: "주택 공급",
+    },
+    {
+      label: "대출",
+      keyword: "주택 대출",
+      keywords: ["대출", "DSR", "LTV", "금융규제"],
+      titlePrefix: "대출 환경",
+    },
+    {
+      label: "금리",
+      keyword: "한국은행 기준금리",
+      keywords: ["금리", "한국은행", "대출금리", "기준금리"],
+      titlePrefix: "금리",
+    },
+    {
+      label: "전세",
+      keyword: "전세 시장",
+      keywords: ["전세", "역전세", "임대차", "보증금"],
+      titlePrefix: "전세 시장",
+    },
+  ];
+  const signals = await Promise.all(specs.map(async (spec) => {
+    const signal = await collectMacroNewsSignal(spec);
+    return signal || {
+      label: spec.label,
+      title: `${spec.titlePrefix} 수집 대기`,
+      summary: `${spec.keyword} 관련 흐름을 배치로 수집합니다.`,
+      source: "시스템",
+      at: new Date().toISOString().slice(0, 10),
+      empty: true,
+    };
+  }));
+  const fx = await fetchExchangeRateSignal();
+  return { signals, fx };
+}
+
+async function collectMacroNewsSignal({ label, keyword, keywords, titlePrefix }) {
+  const endpoint = String(state.settings.newsEndpoint || "/api/news").trim();
+  if (!endpoint) return null;
+  try {
+    const url = new URL(endpoint, window.location.origin);
+    url.searchParams.set("keyword", keyword);
+    url.searchParams.set("keywords", keywords.join(","));
+    const response = await fetch(url.toString(), { headers: { Accept: "application/json" } });
+    if (!response.ok) return null;
+    const payload = await response.json();
+    const items = normalizeNewsPayload(payload, { id: "", name: keyword, region: keyword, tags: [] }, keyword);
+    const latest = items[0];
+    if (!latest) return null;
+    return {
+      label,
+      title: cleanNewsText(latest.title || `${titlePrefix} 동향`),
+      summary: cleanNewsText(latest.summary || `${keyword} 관련 흐름을 확인하세요.`),
+      source: cleanNewsText(latest.source || "외부 수집"),
+      at: latest.at || new Date().toISOString().slice(0, 10),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function fetchExchangeRateSignal() {
+  const sources = [
+    {
+      label: "USD/KRW",
+      url: "https://open.er-api.com/v6/latest/USD",
+      parse: (payload) => {
+        const rate = Number(payload?.rates?.KRW);
+        if (!rate) return null;
+        return {
+          label: "환율",
+          value: `${rate.toLocaleString("ko-KR", { maximumFractionDigits: 2 })}원`,
+          source: "open.er-api.com",
+          at: payload?.time_last_update_utc ? String(payload.time_last_update_utc).slice(0, 16) : new Date().toISOString().slice(0, 10),
+        };
+      },
+    },
+  ];
+
+  for (const source of sources) {
+    try {
+      const response = await fetch(source.url, { headers: { Accept: "application/json" } });
+      if (!response.ok) continue;
+      const payload = await response.json();
+      const parsed = source.parse(payload);
+      if (parsed) return parsed;
+    } catch {
+      // ignore and continue
+    }
+  }
+
+  return null;
 }
 
 async function collectNewsItems() {
   const endpoint = String(state.settings.newsEndpoint || "/api/news").trim();
   if (!endpoint) return [];
 
-  const keywords = getNewsKeywords();
-  const settled = await Promise.allSettled(keywords.map(async (keyword) => {
+  const targets = getNewsTargets();
+  const settled = await Promise.allSettled(targets.map(async ({ property, keyword }) => {
     const url = new URL(endpoint, window.location.origin);
     url.searchParams.set("keyword", keyword);
-    url.searchParams.set("keywords", keywords.join(","));
+    url.searchParams.set("keywords", (property.tags || []).join(","));
 
     const response = await fetch(url.toString(), {
       headers: { Accept: "application/json" },
@@ -2145,32 +3151,32 @@ async function collectNewsItems() {
     if (!response.ok) return [];
 
     const payload = await response.json();
-    return normalizeNewsPayload(payload, keyword);
+    return normalizeNewsPayload(payload, property, keyword);
   }));
 
   return settled.flatMap((result) => (result.status === "fulfilled" ? result.value : []));
 }
 
-function normalizeNewsPayload(payload, keyword) {
+function normalizeNewsPayload(payload, property, keyword) {
   const items = Array.isArray(payload) ? payload : (payload?.items || payload?.news || []);
   return items.map((item) => ({
     id: item.id || `n-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    propertyId: item.propertyId || inferPropertyId(item, keyword),
-    keyword: cleanNewsText(item.keyword || keyword),
-    title: cleanNewsText(item.title || item.headline || `${keyword} 관련 뉴스`),
+    propertyId: item.propertyId || property.id || inferPropertyId(item, keyword, property),
+    keyword: cleanNewsText(item.keyword || property.name || keyword),
+    title: cleanNewsText(item.title || item.headline || `${property.name} 관련 뉴스`),
     summary: cleanNewsText(item.summary || item.description || item.content || ""),
-    source: cleanNewsText(item.source || item.publisher || "외부 수집"),
+    source: cleanNewsText(item.source || item.publisher || "관심 자산 수집"),
     at: item.at || item.publishedAt || item.date || new Date().toISOString().slice(0, 10),
   }));
 }
 
-function inferPropertyId(item, keyword) {
-  const haystack = [item.title, item.summary, item.content, keyword].join(" ");
+function inferPropertyId(item, keyword, fallbackProperty = null) {
+  const haystack = [item.title, item.summary, item.content, keyword, fallbackProperty?.name, fallbackProperty?.region].join(" ");
   const matched = state.properties.find((property) => {
     const tokens = [property.name, property.region, ...(property.tags || [])].filter(Boolean);
     return tokens.some((token) => haystack.includes(token));
   });
-  return matched?.id || "";
+  return matched?.id || fallbackProperty?.id || "";
 }
 
 function mergeNewsItems(freshItems, existingItems) {
@@ -2191,17 +3197,14 @@ function mergeNewsItems(freshItems, existingItems) {
 }
 
 function filterActiveNews(items) {
-  const keywords = getNewsKeywords();
   return items.filter((item) => {
-    if (item.propertyId && !findProperty(item.propertyId)) return false;
     const property = findProperty(item.propertyId);
-    const haystack = [item.keyword, item.title, item.summary, property?.name, property?.region].join(" ");
-    return keywords.some((keyword) => haystack.includes(keyword));
+    return Boolean(property);
   });
 }
 
 function isSampleNews(item) {
-  return item?.source === "키워드 모니터";
+  return item?.source === "자산 모니터";
 }
 
 function cleanNewsText(value) {
@@ -2268,6 +3271,16 @@ function formatFitScore(property) {
   return formatScore(property.fitScore);
 }
 
+function describeLocationScoreSource(score) {
+  const source = String(score?.source || score?.datasetId || score?.datasetName || "").toLowerCase();
+  if (score?.datasetName) return score.datasetName;
+  if (source.includes("gb_r001")) return "GB R001";
+  if (source.includes("vworld")) return "VWorld";
+  if (source.includes("molit") || source.includes("trade") || source.includes("rent")) return "국토부";
+  if (source.includes("kakao")) return "Kakao";
+  return "미입력";
+}
+
 function formatDistance(value) {
   if (!value) return "미입력";
   return `${Math.round(value).toLocaleString()}m`;
@@ -2303,6 +3316,7 @@ async function unlockOrSetAdminPasscode() {
   const input = document.querySelector("#adminPasscode");
   const passcode = input.value;
   const lockedUntil = Number(state.security.lockedUntil || 0);
+  const tempPasscodeExpiresAt = Number(state.security.tempPasscodeExpiresAt || 0);
 
   if (lockedUntil > Date.now()) {
     renderSecurity();
@@ -2310,13 +3324,17 @@ async function unlockOrSetAdminPasscode() {
   }
 
   if (passcode.length < 6) {
-    document.querySelector("#securityStatus").textContent = "패스코드는 6자 이상이어야 합니다.";
+    setSecurityMessage("패스코드는 6자 이상이어야 합니다.");
     return;
   }
 
   if (!state.security.passcodeHash) {
-    state.security.salt = crypto.randomUUID();
-    state.security.passcodeHash = await hashPasscode(passcode, state.security.salt);
+    if (passcode !== DEFAULT_ADMIN_PASSCODE) {
+      setSecurityMessage("기본 패스코드는 jeongmin 입니다.");
+      return;
+    }
+    state.security.salt = DEFAULT_ADMIN_PASSCODE_SALT;
+    state.security.passcodeHash = DEFAULT_ADMIN_PASSCODE_HASH;
     state.security.failedAttempts = 0;
     state.security.lockedUntil = 0;
     adminUnlocked = true;
@@ -2325,6 +3343,21 @@ async function unlockOrSetAdminPasscode() {
     scheduleAdminAutoLock();
     render();
     return;
+  }
+
+  if (state.security.tempPasscodeHash && tempPasscodeExpiresAt > Date.now()) {
+    const tempCandidate = await hashPasscode(passcode, state.security.tempPasscodeSalt);
+    if (tempCandidate === state.security.tempPasscodeHash) {
+      state.security.failedAttempts = 0;
+      state.security.lockedUntil = 0;
+      state.security.resetRequired = true;
+      adminUnlocked = true;
+      saveState();
+      input.value = "";
+      setView("recovery");
+      renderSecurity();
+      return;
+    }
   }
 
   const candidateHash = await hashPasscode(passcode, state.security.salt);
@@ -2351,9 +3384,117 @@ async function unlockOrSetAdminPasscode() {
 }
 
 function lockAdmin() {
-  adminUnlocked = !state.security.passcodeHash;
+  adminUnlocked = false;
+  securityRecoveryOpen = false;
+  state.security.resetRequired = false;
+  securityRecoverySending = false;
   if (adminAutoLockTimer) clearTimeout(adminAutoLockTimer);
   renderSecurity();
+  renderTopActions();
+  renderSettings();
+}
+
+function openRecoveryScreen() {
+  securityRecoveryOpen = true;
+  state.security.resetRequired = false;
+  const recoveryName = document.querySelector("#recoveryName");
+  const recoveryEmail = document.querySelector("#recoveryEmail");
+  if (recoveryName) recoveryName.value = "";
+  if (recoveryEmail) recoveryEmail.value = "";
+  setView("recovery");
+  renderSecurity();
+}
+
+async function sendRecoveryEmail() {
+  if (adminUnlocked) return;
+  const recoveryName = value("#recoveryName");
+  const recoveryEmail = value("#recoveryEmail");
+  if (!recoveryName) {
+    setSecurityMessage("이름을 입력하세요.");
+    return;
+  }
+  if (!recoveryEmail) {
+    setSecurityMessage("이메일을 입력하세요.");
+    return;
+  }
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(recoveryEmail)) {
+    setSecurityMessage("이메일 형식이 아닙니다.");
+    return;
+  }
+
+  const tempPasscode = generateTempPasscode();
+  const tempPasscodeSalt = generateTempSalt();
+  const tempPasscodeHash = await hashPasscode(tempPasscode, tempPasscodeSalt);
+  const expiresAt = Date.now() + 10 * 60 * 1000;
+
+  state.security.tempPasscodeHash = tempPasscodeHash;
+  state.security.tempPasscodeSalt = tempPasscodeSalt;
+  state.security.tempPasscodeExpiresAt = expiresAt;
+  state.security.resetRequired = false;
+  securityRecoverySending = true;
+  setSecurityMessage("임시 비밀번호를 보내는 중입니다...");
+  renderSecurity();
+  saveState();
+
+  const sent = await sendRecoveryDispatch({ recoveryName, recoveryEmail, tempPasscode, expiresAt });
+  securityRecoverySending = false;
+  setSecurityMessage(sent ? "임시 비밀번호를 보냈습니다." : "보내지 못했습니다. 설정과 로그를 확인하세요.");
+  renderSecurity();
+}
+
+async function sendRecoveryDispatch({ recoveryName, recoveryEmail, tempPasscode, expiresAt }) {
+  try {
+    const response = await fetch("/api/admin/recovery", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        recoveryName,
+        recoveryEmail,
+        tempPasscode,
+        expiresAt,
+        origin: window.location.origin,
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload?.error || `recovery email ${response.status}`);
+    if (payload?.sent) return true;
+    throw new Error(payload?.error || "recovery email not sent");
+  } catch (error) {
+    setSecurityMessage(`임시 비밀번호 발송 실패: ${error?.message || "알 수 없는 오류"}`);
+    return false;
+  }
+}
+
+async function saveNewAdminPasscode() {
+  const newPasscode = value("#newAdminPasscode");
+  const confirmPasscode = value("#newAdminPasscodeConfirm");
+  if (newPasscode.length < 6) {
+    setSecurityMessage("새 비밀번호는 6자 이상이어야 합니다.");
+    return;
+  }
+  if (newPasscode !== confirmPasscode) {
+    setSecurityMessage("새 비밀번호가 서로 다릅니다.");
+    return;
+  }
+
+  const salt = generateTempSalt();
+  const passcodeHash = await hashPasscode(newPasscode, salt);
+  state.security.passcodeHash = passcodeHash;
+  state.security.salt = salt;
+  state.security.failedAttempts = 0;
+  state.security.lockedUntil = 0;
+  state.security.resetRequired = false;
+  state.security.tempPasscodeHash = DEFAULT_TEMP_PASSCODE_HASH;
+  state.security.tempPasscodeSalt = DEFAULT_TEMP_PASSCODE_SALT;
+  state.security.tempPasscodeExpiresAt = DEFAULT_TEMP_PASSCODE_EXPIRES_AT;
+  adminUnlocked = true;
+  saveState();
+  document.querySelector("#newAdminPasscode").value = "";
+  document.querySelector("#newAdminPasscodeConfirm").value = "";
+  document.querySelector("#adminPasscode").value = "";
+  scheduleAdminAutoLock();
+  setView("admin");
+  render();
 }
 
 function scheduleAdminAutoLock() {
@@ -2367,6 +3508,18 @@ async function hashPasscode(passcode, salt) {
   const bytes = new TextEncoder().encode(`${salt}:${passcode}`);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function generateTempPasscode() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("");
+}
+
+function generateTempSalt() {
+  return Array.from(crypto.getRandomValues(new Uint8Array(16)))
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
 }

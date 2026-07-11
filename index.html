@@ -12,12 +12,16 @@
   <body class="landing-page">
     <header class="landing-nav">
       <a class="landing-brand" href="/" aria-label="부동산 모니터 홈">
-        <span>RE</span>
+        <span class="landing-logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+            <path d="M4 12.5 12 5l8 7.5v6.5H4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
+            <path d="M9 20v-5h6v5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+            <path d="M8.5 14.5 12 11l3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </span>
         <strong>부동산 모니터</strong>
       </a>
       <nav aria-label="랜딩 메뉴">
-        <a href="#features">기능</a>
-        <a href="#data">데이터</a>
         <a class="landing-nav-cta" href="/app">앱 열기</a>
       </nav>
     </header>
@@ -25,14 +29,18 @@
     <main>
       <section class="landing-hero">
         <div class="landing-copy">
-          <p class="landing-kicker">실거래, 임장, 뉴스 감시</p>
+          <p class="landing-kicker">관심 자산 모니터</p>
           <h1>부동산 모니터</h1>
           <p class="landing-lead">
-            관심 단지를 등록하면 실거래와 전월세 흐름, 입지 점수, 뉴스 변화를 한 화면에서 추적합니다.
+            관심 자산의 실거래, 전월세, 임장 기록, 뉴스 변화를 한 화면에서 확인합니다.
           </p>
           <div class="landing-actions">
             <a class="landing-primary" href="/app">앱 열기</a>
-            <a class="landing-secondary" href="#features">기능 보기</a>
+          </div>
+          <div class="landing-points" aria-label="핵심 기능">
+            <span>실거래 · 전월세</span>
+            <span>임장 · 사진</span>
+            <span>뉴스 · 알림</span>
           </div>
         </div>
 
@@ -64,95 +72,8 @@
                 <strong>4.8억</strong>
               </div>
             </div>
-            <div class="phone-feed">
-              <span></span>
-              <span></span>
-              <span></span>
-            </div>
           </div>
         </div>
-      </section>
-
-      <section class="landing-section" id="features">
-        <div class="section-head">
-          <p class="landing-kicker">Monitoring</p>
-          <h2>관심 단지 중심으로만 간결하게 봅니다.</h2>
-        </div>
-        <div class="feature-list">
-          <article class="feature-row">
-            <span>01</span>
-            <div>
-              <h3>실거래와 전월세 자동 갱신</h3>
-              <p>국토부 API를 통해 매매와 전월세 데이터를 조회하고, 평형별 최근 12개월 흐름을 확인합니다.</p>
-            </div>
-          </article>
-          <article class="feature-row">
-            <span>02</span>
-            <div>
-              <h3>임장 기록과 사진 저장</h3>
-              <p>현장 방문 시 교통, 소음, 관리상태, 주변 환경을 기록하고 관심 자산에 연결합니다.</p>
-            </div>
-          </article>
-          <article class="feature-row">
-            <span>03</span>
-            <div>
-              <h3>뉴스와 변경 감지</h3>
-              <p>현재 관심목록에 남아 있는 단지만 기준으로 키워드를 만들고, 사라진 자산의 뉴스는 제외합니다.</p>
-            </div>
-          </article>
-        </div>
-      </section>
-
-      <section class="landing-section landing-workflow">
-        <div class="section-head">
-          <p class="landing-kicker">Flow</p>
-          <h2>검색해서 등록하고, 현장에서 보완합니다.</h2>
-        </div>
-        <div class="workflow-grid">
-          <div>
-            <strong>검색</strong>
-            <p>단지명으로 위치와 기본 정보를 찾습니다.</p>
-          </div>
-          <div>
-            <strong>등록</strong>
-            <p>관심 자산에 넣으면 지도 마커와 가격 조회가 연결됩니다.</p>
-          </div>
-          <div>
-            <strong>임장</strong>
-            <p>사진과 체크리스트로 현장 판단을 남깁니다.</p>
-          </div>
-          <div>
-            <strong>감지</strong>
-            <p>시세, 전월세, 뉴스 변화가 생기면 다시 확인합니다.</p>
-          </div>
-        </div>
-      </section>
-
-      <section class="landing-section" id="data">
-        <div class="section-head">
-          <p class="landing-kicker">Data</p>
-          <h2>현재 앱에 연결된 데이터 소스입니다.</h2>
-        </div>
-        <div class="data-grid">
-          <article>
-            <strong>국토교통부 실거래가</strong>
-            <p>아파트 매매 및 전월세 공개 API</p>
-          </article>
-          <article>
-            <strong>Kakao / VWorld</strong>
-            <p>지도, 좌표, 주소 검색 보조 데이터</p>
-          </article>
-          <article>
-            <strong>GB R001 기반 입지 점수</strong>
-            <p>지역별 점수 데이터셋으로 확장 가능한 구조</p>
-          </article>
-        </div>
-      </section>
-
-      <section class="landing-final">
-        <p class="landing-kicker">Start</p>
-        <h2>관심 자산 지도로 바로 이동합니다.</h2>
-        <a class="landing-primary" href="/app">앱 열기</a>
       </section>
     </main>
   </body>

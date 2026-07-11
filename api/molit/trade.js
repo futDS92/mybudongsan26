@@ -44,6 +44,9 @@ async function handleMolitRequest(req, res, type, cache, digits, parseXml) {
     headers: {
       "User-Agent": "Mozilla/5.0 real-estate-monitor/1.0",
       "Accept": "application/xml,text/xml,*/*",
+      "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+      "Origin": "https://www.data.go.kr",
+      "Referer": "https://www.data.go.kr/",
     },
   });
   const xml = await response.text();
