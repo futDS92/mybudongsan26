@@ -343,6 +343,8 @@ let detailPropertyId = null;
 let detailSelectedArea = null;
 let newsRequestSeq = 0;
 let deviceResizeTimer = null;
+let gbR001DatasetPromise = null;
+let gbR001Dataset = null;
 const deviceState = {
   profile: "",
 };
@@ -604,7 +606,7 @@ function setView(view) {
 }
 
 function bindForms() {
-  document.querySelector("#propertyForm").addEventListener("submit", (event) => {
+  document.querySelector("#propertyForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const id = document.querySelector("#propertyId").value || `p-${Date.now()}`;
     const existing = state.properties.find((property) => property.id === id);
@@ -638,6 +640,10 @@ function bindForms() {
       x: existing?.x || 28 + Math.random() * 48,
       y: existing?.y || 28 + Math.random() * 42,
     };
+    await applyGbR001Score(property, {
+      preserveFitScore: Boolean(fitScoreText),
+      preserveSubwayDistance: Boolean(subwayText),
+    });
 
     state.properties = existing
       ? state.properties.map((item) => (item.id === id ? property : item))
@@ -1177,6 +1183,7 @@ function addMapSearchResult() {
       x: existing?.x || 50,
       y: existing?.y || 50,
     };
+    await applyGbR001Score(property);
 
     state.properties = existing
       ? state.properties.map((item) => (item.id === existing.id ? property : item))
@@ -1720,11 +1727,10 @@ function getRecentDealMonths(baseMonth, count) {
 }
 
 async function enrichLocationSignals() {
-  if (!window.kakao?.maps?.services) return false;
   let changed = false;
   await Promise.all(state.properties.map(async (property) => {
     if (!property.lat || !property.lng) return;
-    if (!property.subwayDistance) {
+    if (!property.subwayDistance && window.kakao?.maps?.services) {
       const subway = await findNearestSubway(property);
       if (subway) {
         property.subwayDistance = Number(subway.distance || 0);
@@ -1733,12 +1739,19 @@ async function enrichLocationSignals() {
       }
     }
     if (!property.fitScore) {
-      const score = getGbR001Score(property);
-      property.fitScore = score?.score || 0;
-      property.fitScoreSource = score?.source || "unsupported";
-      changed = true;
+      const score = await getGbR001Score(property);
+      if (score?.score) {
+        property.fitScore = score.score;
+        property.fitScoreSource = score.source;
+        if (score.subwayDistance && !property.subwayDistance) property.subwayDistance = score.subwayDistance;
+        property.gbR001 = score;
+        changed = true;
+      } else if (!property.fitScoreSource) {
+        property.fitScoreSource = score?.source || "unsupported";
+        changed = true;
+      }
     } else if (!property.fitScoreSource) {
-      property.fitScoreSource = getGbR001Score(property)?.source || "unsupported";
+      property.fitScoreSource = (await getGbR001Score(property))?.source || "unsupported";
       changed = true;
     }
   }));
@@ -1760,22 +1773,87 @@ function findNearestSubway(property) {
   });
 }
 
-function getGbR001Score(property) {
-  const bbox = {
-    minLng: 126.91840109260757,
-    maxLng: 126.94351175829748,
-    minLat: 37.56095715749996,
-    maxLat: 37.58414373834019,
-  };
-  if (
-    property.lng < bbox.minLng ||
-    property.lng > bbox.maxLng ||
-    property.lat < bbox.minLat ||
-    property.lat > bbox.maxLat
-  ) {
+async function applyGbR001Score(property, options = {}) {
+  const score = await getGbR001Score(property);
+  if (!score?.score) {
+    property.fitScoreSource = score?.source || "unsupported";
+    return false;
+  }
+  if (!options.preserveFitScore) property.fitScore = score.score;
+  if (!options.preserveSubwayDistance && score.subwayDistance) property.subwayDistance = score.subwayDistance;
+  property.fitScoreSource = score.source;
+  property.gbR001 = score;
+  return true;
+}
+
+async function getGbR001Score(property) {
+  if (!property?.lat || !property?.lng) return { score: 0, source: "missing-coordinate" };
+  const dataset = await loadGbR001Dataset();
+  if (!dataset?.features?.length) return { score: 0, source: "gb_r001-unavailable" };
+  const [minLng, minLat, maxLng, maxLat] = dataset.bbox || [];
+  if (!pointInBbox(property.lng, property.lat, [minLng, minLat, maxLng, maxLat])) {
     return { score: 0, source: "unsupported" };
   }
-  return { score: Number(property.fitScore || 4.2), source: "gb_r001" };
+
+  const candidates = dataset.features.filter((feature) => pointInBbox(property.lng, property.lat, feature.bbox));
+  const matched = candidates.find((feature) => feature.rings?.some((ring) => pointInRing(property.lng, property.lat, ring)));
+  const feature = matched || nearestFeature(property.lng, property.lat, candidates);
+  if (!feature) return { score: 0, source: "unsupported" };
+
+  return {
+    source: matched ? "gb_r001" : "gb_r001-nearest",
+    datasetId: dataset.id,
+    datasetName: dataset.name,
+    score: Number(feature.score || 0),
+    subwayDistance: Number(feature.subwayDistance || 0),
+    usageScore: Number(feature.usageScore || 0),
+    policeDistance: Number(feature.policeDistance || 0),
+    universityDistance: Number(feature.universityDistance || 0),
+    policeScore: Number(feature.policeScore || 0),
+    universityScore: Number(feature.universityScore || 0),
+  };
+}
+
+async function loadGbR001Dataset() {
+  if (gbR001Dataset) return gbR001Dataset;
+  if (!gbR001DatasetPromise) {
+    gbR001DatasetPromise = fetch("/data/gb_r001.json", { headers: { Accept: "application/json" } })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload) => {
+        gbR001Dataset = payload;
+        return payload;
+      })
+      .catch(() => null);
+  }
+  return gbR001DatasetPromise;
+}
+
+function pointInBbox(lng, lat, bbox) {
+  if (!bbox || bbox.length < 4) return false;
+  return lng >= bbox[0] && lat >= bbox[1] && lng <= bbox[2] && lat <= bbox[3];
+}
+
+function pointInRing(lng, lat, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    const intersects = ((yi > lat) !== (yj > lat))
+      && (lng < ((xj - xi) * (lat - yi)) / ((yj - yi) || Number.EPSILON) + xi);
+    if (intersects) inside = !inside;
+  }
+  return inside;
+}
+
+function nearestFeature(lng, lat, features) {
+  return [...features]
+    .sort((a, b) => squaredDistance(lng, lat, a.centroid) - squaredDistance(lng, lat, b.centroid))[0];
+}
+
+function squaredDistance(lng, lat, centroid = []) {
+  const dx = lng - Number(centroid[0] || 0);
+  const dy = lat - Number(centroid[1] || 0);
+  return dx * dx + dy * dy;
 }
 
 function getMonitorLawdCodes() {
